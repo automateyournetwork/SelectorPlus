@@ -25,84 +25,112 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# def load_local_tools_from_folder(folder_path: str) -> List[Tool]:
-#     local_tools = []
+def load_local_tools_from_folder(folder_path: str) -> List[Tool]:
+    local_tools = []
 
-#     for filename in os.listdir(folder_path):
-#         if filename.endswith(".py") and not filename.startswith("__"):
-#             module_name = filename[:-3]
-#             try:
-#                 module = importlib.import_module(f"{folder_path}.{module_name}")
-#                 for name, obj in inspect.getmembers(module):
-#                     if isinstance(obj, Tool):
-#                         wrapped = wrap_dict_input_tool(obj)
-#                         local_tools.append(wrapped)
-#                         print(f"✅ Loaded local tool: {wrapped.name}")
-#                     elif isinstance(obj, StructuredTool):
-#                         local_tools.append(obj)
-#                         print(f"✅ Loaded structured tool: {obj.name}")
-#             except Exception as e:
-#                 print(f"❌ Failed to import {module_name}: {e}")
-#     return local_tools
+    for filename in os.listdir(folder_path):
+        if filename.endswith(".py") and not filename.startswith("__"):
+            module_name = filename[:-3]
+            try:
+                module = importlib.import_module(f"{folder_path}.{module_name}")
+                for name, obj in inspect.getmembers(module):
+                    if isinstance(obj, Tool):
+                        wrapped = wrap_dict_input_tool(obj)
+                        local_tools.append(wrapped)
+                        print(f"✅ Loaded local tool: {wrapped.name}")
+                    elif isinstance(obj, StructuredTool):
+                        local_tools.append(obj)
+                        print(f"✅ Loaded structured tool: {obj.name}")
+            except Exception as e:
+                print(f"❌ Failed to import {module_name}: {e}")
+    return local_tools
 
-# def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
-#     original_func = tool_obj.func
+def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
+    original_func = tool_obj.func
 
-#     @wraps(original_func)
-#     def wrapper(input_value):
-#         if isinstance(input_value, str):
-#             input_value = {"ip": input_value}
-#         elif isinstance(input_value, dict) and "ip" not in input_value:
-#             # You could log or raise a warning here if needed
-#             logger.warning(f"⚠️ Missing 'ip' key in dict: {input_value}")
-#         return original_func(input_value)
+    @wraps(original_func)
+    def wrapper(input_value):
+        if isinstance(input_value, str):
+            input_value = {"ip": input_value}
+        elif isinstance(input_value, dict) and "ip" not in input_value:
+            # You could log or raise a warning here if needed
+            logger.warning(f"⚠️ Missing 'ip' key in dict: {input_value}")
+        return original_func(input_value)
 
-#     return Tool(
-#         name=tool_obj.name,
-#         description=tool_obj.description,
-#         func=wrapper,
-#     )
+    return Tool(
+        name=tool_obj.name,
+        description=tool_obj.description,
+        func=wrapper,
+    )
+
+logger = logging.getLogger(__name__)
 
 class MCPToolDiscovery:
-    def __init__(self, service_name: str, command: List[str] = None):
-        """
-        Initialize MCP Tool Discovery for a specific service.
-        
-        :param service_name: Name of the MCP service
-        :param command: Optional command to start the service
-        """
-        self.service_name = service_name
-        self.server_params = StdioServerParameters(
-            command=command[0] if command else "python",
-            args=command[1:] if command and len(command) > 1 else [],
-        )
-        logging.info(f"Server params: {self.server_params}")
+    def __init__(self, container_name: str, command: List[str], discovery_method: str = "tools/discover", call_method: str = "tools/call"):
+        self.container_name = container_name
+        self.command = command
+        self.discovery_method = discovery_method
+        self.call_method = call_method
         self.discovered_tools = []
 
     async def discover_tools(self) -> List[Dict[str, Any]]:
-        logging.info(f"Attempting to connect to stdio_client for {self.service_name}")
-        """
-        Discover tools for the specified service.
-        
-        :return: List of discovered tool definitions
-        """
-        async with stdio_client(self.server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                logging.info("here")
-                try:
-                    # List available tools
-                    tools = await session.list_tools()
-                    
-                    print(f"🔍 Discovered {len(tools)} tools for {self.service_name}")
-                    for tool in tools:
-                        print(f"✅ Tool: {tool.name} - {tool.description}")
-                    
-                    return tools
-                
-                except Exception as e:
-                    print(f"❌ Error discovering tools for {self.service_name}: {e}")
-                    return []
+        print(f"🔍 Discovering tools from container: {self.container_name}")
 
+        try:
+            discovery_payload = {
+                "jsonrpc": "2.0",
+                "method": self.discovery_method,
+                "params": {},
+                "id": "1"
+            }
+            command = ["docker", "exec", "-i", self.container_name] + self.command
+            process = subprocess.run(
+                command,
+                input=json.dumps(discovery_payload) + "\n",
+                capture_output=True,
+                text=True,
+            )
+            stdout_lines = process.stdout.strip().split("\n")
+            print("📥 Raw discovery response:", stdout_lines)
+            if stdout_lines:
+                last_line = None
+                for line in reversed(stdout_lines):
+                    if line.startswith("{") or line.startswith("["):
+                        last_line = line
+                        break
+                if last_line:
+                    try:
+                        response = json.loads(last_line)
+                        # Correctly handle both response structures
+                        if "result" in response:
+                            if isinstance(response["result"], list):
+                                tools = response["result"]
+                            elif isinstance(response["result"], dict) and "tools" in response["result"]:
+                                tools = response["result"]["tools"]
+                            else:
+                                print("❌ Unexpected 'result' structure.")
+                                return []
+                        else:
+                            tools = []  # Assuming no tools if result is not present
+                        if tools:
+                            print("✅ Discovered tools:", [tool["name"] for tool in tools])
+                            return tools
+                        else:
+                            print("❌ No tools found in response.")
+                            return []
+                    except json.JSONDecodeError as e:
+                        print(f"❌ JSON Decode Error: {e}")
+                        return []
+                else:
+                    print("❌ No valid JSON response found.")
+                    return []
+            else:
+                print("❌ No response lines received.")
+                return []
+        except Exception as e:
+            print(f"❌ Error discovering tools: {e}")
+            return []
+        
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
         """
         Call a specific tool with given arguments.
@@ -111,15 +139,52 @@ class MCPToolDiscovery:
         :param arguments: Arguments for the tool
         :return: Tool execution result
         """
-        async with stdio_client(self.server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                try:
-                        result = await session.call_tool(tool_name, arguments=arguments)
-                        logger.info(f"✅ Tool '{tool_name}' on service '{self.service_name}' returned: {result}") # ADDED
-                        return result
-                except Exception as e:
-                    logger.error(f"❌ Error calling tool '{tool_name}' on service '{self.service_name}': {e}", exc_info=True) # ADDED
+        command = ["docker", "exec", "-i", self.container_name] + self.command
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "method": self.call_method,
+                "params": {"name": tool_name, "arguments": arguments},
+                "id": "2",
+            }
+
+            process = subprocess.run(
+                command,
+                input=json.dumps(payload) + "\n",
+                capture_output=True,
+                text=True,
+            )
+
+            logger.info(f"📥 STDOUT: {process.stdout}")
+            if process.stderr:
+                logger.error(f"🚨 STDERR: {process.stderr}")
+
+            # Parse the output
+            if process.stdout:
+                output = process.stdout.strip()
+                # Find the last valid JSON object
+                json_lines = []
+                for line in reversed(output.splitlines()):
+                    line = line.strip()
+                    if line.startswith("{") or line.startswith("["):
+                        try:
+                            json_lines.append(json.loads(line))
+                            break
+                        except json.JSONDecodeError:
+                            logger.warning(f"Ignoring invalid JSON line: {line}")
+                    if json_lines:
+                        response = json_lines[0]
+                        logger.info(f"Parsed JSON response: {response}")
+                        return response.get("result")  # Or whatever field you need
+                    else:
+                        logger.error("No valid JSON found in output")
+                        return None
+                else:
+                    logger.error("No output from subprocess")
                     return None
+        except Exception as e:
+            logger.error(f"Error calling tool {tool_name}: {e}", exc_info=True)
+            return None
 
 def load_mcp_tools() -> List[Tool]:
     """
