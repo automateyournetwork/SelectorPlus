@@ -1,0 +1,30 @@
+name: excalidraw-mcp
+version: 0.1.0
+description: MCP server for Excalidraw
+author: Your Name
+license: MIT
+repository: https://github.com/yourusername/excalidraw-mcp
+homepage: https://github.com/yourusername/excalidraw-mcp
+
+entrypoint:
+  type: stdio
+  command: node dist/index.js
+
+capabilities:
+  tools:
+    - name: create_drawing
+      description: Create a new Excalidraw drawing
+    - name: get_drawing
+      description: Get an Excalidraw drawing by ID
+    - name: update_drawing
+      description: Update an Excalidraw drawing by ID
+    - name: delete_drawing
+      description: Delete an Excalidraw drawing by ID
+    - name: list_drawings
+      description: List all Excalidraw drawings
+    - name: export_to_svg
+      description: Export an Excalidraw drawing to SVG
+    - name: export_to_png
+      description: Export an Excalidraw drawing to PNG
+    - name: export_to_json
+      description: Export an Excalidraw drawing to JSON 

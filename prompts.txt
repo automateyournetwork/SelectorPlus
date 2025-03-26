@@ -1,0 +1,8 @@
+What can you tell me about Selector device S3 ? Please send a health report to the Slack channel C08JG9RART7; GitHub repository AutomateYourNetwork repo Packet_Conversations. Do not use the network tools right now just the Selector Health Report. Thank you.
+Can you use your sequential thinking to help determine if Selector device S3 is healthy?
+Can you determine the health of Device S3 in Selector and make a report in GitHub AutomateYourNetwork repository Packet_Conversations root folder called "Selector S3 Device Health Report.md"
+Can you check the device health for Selector device S3, assume it is in Atlanta, and give me the geo info as well as its health info
+Could you please check the health for Selector device S3 and send a Slack summary to John in channel C08JG9RART7
+Could you please get the health of Selector device S3 and then visualize the health in Excalidraw. Show the diagram ID you made for logging purposes and export the diagram as a SVG?
+Could I please have you check Selector device S3 for health? If there are interface health issues. Use this information you gather about S3 health to then please also draw an Excalidraw diagram showing S3 and its neighbor and their connected interfaces with issues. Please then export this to JSON please
+Can you please check the health of Selector device S3? The Device is in Atlanta can you perform some geolocation lookups and include them in a report on GitHub AutomateYourNetwork repo Packet_Conversations please

@@ -1,0 +1,12 @@
+{
+  "entrypoints": {
+    "SelectorPlus": "selectorplus:compiled_graph"
+  },
+  "graphs": {
+    "SelectorPlus": "selectorplus:compiled_graph"
+  },
+  "dependencies": [
+    "selectorplus/selectorplus.py"
+  ],
+  "env_file": ".env"
+}
