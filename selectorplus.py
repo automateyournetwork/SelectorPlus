@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from langsmith import traceable
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
+from mcp.client.stdio import stdio_client
 from langchain.tools import Tool, StructuredTool
 from typing import Dict, Any, List, Optional, Union
 from mcp import ClientSession, StdioServerParameters, types
