@@ -2,6 +2,7 @@ import os
 import re
 import ast
 import json
+import asyncio
 import inspect
 import logging
 import importlib
@@ -11,8 +12,10 @@ from dotenv import load_dotenv
 from langsmith import traceable
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
+from mcp.client.stdio import stdio_client
 from langchain.tools import Tool, StructuredTool
 from typing import Dict, Any, List, Optional, Union
+from mcp import ClientSession, StdioServerParameters, types
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.prebuilt.tool_node import tools_condition, ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -60,6 +63,8 @@ def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
         func=wrapper,
     )
 
+logger = logging.getLogger(__name__)
+
 class MCPToolDiscovery:
     def __init__(self, container_name: str, command: List[str], discovery_method: str = "tools/discover", call_method: str = "tools/call"):
         self.container_name = container_name
@@ -68,20 +73,9 @@ class MCPToolDiscovery:
         self.call_method = call_method
         self.discovered_tools = []
 
-    def discover_tools(self) -> List[Dict[str, Any]]:
+    async def discover_tools(self) -> List[Dict[str, Any]]:
         print(f"🔍 Discovering tools from container: {self.container_name}")
-        
-        if self.container_name == "google-maps-mcp":
-            logger.info("🔧 Using manual MAPS tool definitions as fallback")
-            return [
-                {"name": "maps_geocode", "description": "Convert an address into geographic coordinates"},
-                {"name": "maps_reverse_geocode", "description": "Convert coordinates into an address"},
-                {"name": "maps_search_places", "description": "Search for places using Google Places API"},
-                {"name": "maps_place_details", "description": "Get detailed information about a specific place"},
-                {"name": "maps_distance_matrix", "description": "Calculate travel distance and time for multiple origins and destinations"},
-                {"name": "maps_elevation", "description": "Get elevation data for locations on the earth"},
-                {"name": "maps_directions", "description": "Get directions between two points"},
-            ]
+        print(f"🕵️ Discovery Method: {self.discovery_method}")
 
         try:
             discovery_payload = {
@@ -90,8 +84,10 @@ class MCPToolDiscovery:
                 "params": {},
                 "id": "1"
             }
+            print(f"Sending discovery payload: {discovery_payload}")  # added log
+            command = ["docker", "exec", "-i", self.container_name] + self.command
             process = subprocess.run(
-                ["docker", "exec", "-i", self.container_name] + self.command,
+                command,
                 input=json.dumps(discovery_payload) + "\n",
                 capture_output=True,
                 text=True,
@@ -127,271 +123,238 @@ class MCPToolDiscovery:
                     except json.JSONDecodeError as e:
                         print(f"❌ JSON Decode Error: {e}")
                         return []
+                    else:
+                        print("❌ No valid JSON response found.")
+                        return []
                 else:
-                    print("❌ No valid JSON response found.")
+                    print("❌ No response lines received.")
                     return []
-            else:
-                print("❌ No response lines received.")
-                return []
         except Exception as e:
             print(f"❌ Error discovering tools: {e}")
             return []
-        
-    def create_dynamic_tool(self, tool_info: Dict[str, Any]) -> Tool:
-        tool_name = tool_info["name"]   
+    
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
+        """
+        Enhanced tool calling method with comprehensive logging and error handling.
+        """
+        logger.info(f"🔍 Attempting to call tool: {tool_name}")
+        logger.info(f"📦 Arguments: {arguments}")
 
-        class FlexibleInput(BaseModel):
-            content: Union[str, Dict[str, Any]] = Field(
-                default=None,
-                description="Flexible input that can be a string or dictionary, used to ask Selector something."
+        # Detailed logging of containers and network
+        try:
+            network_inspect = subprocess.run(
+                ["docker", "network", "inspect", "bridge"],
+                capture_output=True,
+                text=True,
             )
+            logger.info(f"🌐 Network Details: {network_inspect.stdout}")
+        except Exception as e:
+            logger.error(f"❌ Network inspection failed: {e}")
 
-        # Specific input model for GitHub file creation
-        class GitHubFileInput(BaseModel):
-            """
-            Structured input model for GitHub file creation tool.
+        command = ["docker", "exec", "-i", self.container_name] + self.command
 
-            Requires specific fields for creating or updating a file in a GitHub repository.
-            """
-            owner: str = Field(..., description="Repository owner (username or organization)")
-            repo: str = Field(..., description="Repository name")
-            path: str = Field(..., description="Path where to create/update the file")
-            content: str = Field(default="Default content", description="Content of the file")
-            message: str = Field(..., description="Commit message")
-            branch: str = Field(default="main", description="Branch to create/update the file in")
-            sha: Optional[str] = Field(default=None, description="SHA of the file being replaced (required when updating existing files)")  
+        try:
+            # Initialize normalized_args with the original arguments
+            normalized_args = arguments
 
-        class SequentialThinkingInput(BaseModel):
-            thought: str = Field(..., description="Your current thinking step.")
-            nextThoughtNeeded: bool = Field(..., description="Whether another thought step is needed.")
-            thoughtNumber: int = Field(..., description="Current thought number", ge=1)
-            totalThoughts: int = Field(..., description="Estimated total thoughts needed", ge=1)
-            isRevision: bool = Field(default=False, description="Whether this revises previous thinking.")
-            revisesThought: Optional[int] = Field(default=None, description="Which thought number is being reconsidered.")
-            branchFromThought: Optional[int] = Field(default=None, description="Branching point thought number.")
-            branchId: Optional[str] = Field(default=None, description="Branch identifier.")
-            needsMoreThoughts: Optional[bool] = Field(default=None, description="If more thoughts are needed.")
-
-        class SlackPostMessageInput(BaseModel):
-            """
-            Structured input for sending a message to a Slack channel.
-            """
-            channel_id: str = Field(..., description="The ID of the Slack channel to post to")
-            text: str = Field(..., description="The message text to send")
-
-        class IPInput(BaseModel):
-            ip: str
-
-        class CreateDrawingInput(BaseModel):
-            name: str = Field(..., description="Name of the Excalidraw drawing")
-            content: str = Field(..., description="Instructions or content for the drawing")
-
-        class ExportToJsonInput(BaseModel):
-            """
-            Structured input for exporting an Excalidraw drawing to JSON.
-            """
-            id: str = Field(..., description="The unique identifier of the Excalidraw drawing to export")
-        
-        @traceable(name=f"Tool - {tool_name}")
-        def dynamic_tool_function(content: Union[str, Dict[str, Any]] = None, **kwargs):
-            logger.info(f"⚙️ Calling tool: {tool_name}")
-            logger.info(f"🔍 Full kwargs received: {kwargs}")
-
-            try:
-                payload_arguments = {}  # Initialize as empty dict
-                if content:
-                  payload_arguments['content'] = content
-
-                # Special handling for create_or_update_file
-                if tool_name == "create_or_update_file":
-                    # Check if content exists in the original tool calls
-                    if 'content' in kwargs:
-                        payload_arguments['content'] = kwargs['content']
-                    elif content:
-                        payload_arguments['content'] = content
-
-                    # Fallback to default if no content
-                    if 'content' not in payload_arguments or not payload_arguments['content']:
-                        logger.warning("No content found. Using default content.")
-                        payload_arguments['content'] = "Default health report content for Selector Device S3"
-
-                    # Ensure 'branch' is always provided
-                    if 'branch' not in payload_arguments:
-                        payload_arguments['branch'] = 'main'  # Default branch
-
-                    logger.info(f"🚀 Final payload_arguments for file creation: {payload_arguments}")
-                elif tool_name == "sequentialthinking":
-                    # ✅ Use all structured fields already passed through args
-                    if content and isinstance(content, dict):
-                        payload_arguments.update(content)
-                    elif isinstance(content, str):
-                        payload_arguments["thought"] = content
-                    # Ensure required fields if missing (for robustness)
-                    if "thoughtNumber" not in payload_arguments:
-                        payload_arguments["thoughtNumber"] = 1
-                    if "totalThoughts" not in payload_arguments:
-                        payload_arguments["totalThoughts"] = 5
-                    if "nextThoughtNeeded" not in payload_arguments:
-                        payload_arguments["nextThoughtNeeded"] = True
-                    if "isRevision" not in payload_arguments:
-                        payload_arguments["isRevision"] = False
-
-                elif tool_name == "create_drawing":
-                    if content:
-                        payload_arguments["content"] = content
-                    if "name" not in payload_arguments:
-                        payload_arguments["name"] = "AI Drawing"
-                    logger.info(f"🖌️ Final payload_arguments for drawing: {payload_arguments}")
-
-                elif tool_name == "ask_selector":
-                    if content:
-                        payload_arguments["content"] = content
-                    else:
-                      logger.warning(f"⚠️ No content provided for ask_selector. Using default empty string")
-                      payload_arguments['content'] = ""
-
-                    logger.info(f"🔍 ask_selector arguments: {payload_arguments}")
-
-                payload = {
-                    "jsonrpc": "2.0",
-                    "method": self.call_method,
-                    "params": {"name": tool_name, "arguments": payload_arguments},
-                    "id": "2",
+            # Format arguments based on tool type and tool name
+            if tool_name == 'ask_selector':
+                # Check if arguments has '__arg1' and format as {'content': ...}
+                if "__arg1" in arguments:
+                    normalized_args = {"content": arguments["__arg1"]}
+            elif tool_name == 'excalidraw-mcp' or tool_name == 'slack-mcp' or tool_name == 'google-maps-mcp' or tool_name == 'github-mcp' or tool_name == 'sequentialthinking-mcp':
+                normalized_args = {
+                    "__arg1": json.dumps(arguments) if len(arguments) > 1 else list(arguments.values())[0]
                 }
 
-                logger.info(f"📤 Payload: {json.dumps(payload, indent=2)}")
+            payload = {
+                "jsonrpc": "2.0",
+                "method": self.call_method,
+                "params": {"name": tool_name, "arguments": normalized_args},
+                "id": "2",
+            }
 
-                process = subprocess.run(
-                    ["docker", "exec", "-i", self.container_name] + self.command,
-                    input=json.dumps(payload) + "\n",
-                    capture_output=True,
-                    text=True,
-                )
+            logger.info(f"🚀 Full Payload: {json.dumps(payload)}")
 
-                logger.info(f"📥 STDOUT: {process.stdout}")
-                if process.stderr:
-                    logger.error(f"🚨 STDERR: {process.stderr}")
-
-                stdout_lines = process.stdout.strip().split("\n")
-                if stdout_lines:
-                    last_line = stdout_lines[-1]
-                    try:
-                        response = json.loads(last_line)
-                        logger.info(f"📝 Full Response: {json.dumps(response, indent=2)}")
-
-                        result = response.get("result", {})
-                        content = result.get("content", str(result))
-
-                        logger.info(f"✅ Result content: {content}")
-                        return content
-                    except json.JSONDecodeError as e:
-                        logger.error(f"❌ JSON Decode Error: {e}")
-                        return f"JSON Decode Error: {e}"
-                else:
-                    logger.warning("❌ No response lines received.")
-                    return "No response from tool"
-
-            except Exception as e:
-                logger.error(f"❌ Execution error: {e}")
-                return f"Execution error: {e}"
-        
-        return StructuredTool.from_function(
-            name=tool_name,
-            description=tool_info.get("description", f"Tool from {self.container_name}"),
-            func=dynamic_tool_function,
-            args_schema=(
-                GitHubFileInput if tool_name == "create_or_update_file" else
-                SequentialThinkingInput if tool_name == "sequentialthinking" else
-                SlackPostMessageInput if tool_name == "slack_post_message" else
-                CreateDrawingInput if tool_name == "create_drawing" else
-                ExportToJsonInput if tool_name == "export_to_json" else
-                IPInput if tool_name in {
-                    "bgp_lookup_tool",
-                    "curl_lookup_tool",
-                    "dig_tool",
-                    "nslookup_tool",
-                    "ping_tool",
-                    "whois_tool",
-                    "get_location_tool",
-                    "traceroute_tool",
-                    "threat_check_tool"
-                } else
-                FlexibleInput
-                )
+            process = subprocess.run(
+                command,
+                input=json.dumps(payload) + "\n",
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},  # Ensure unbuffered output
             )
+
+            logger.info(f"🔬 Subprocess Exit Code: {process.returncode}")
+            logger.info(f"🔬 Full subprocess stdout: {process.stdout}")
+            logger.info(f"🔬 Full subprocess stderr: {process.stderr}")
+
+            if process.returncode != 0:
+                logger.error(f"❌ Subprocess returned non-zero exit code: {process.returncode}")
+                logger.error(f"🚨 Error Details: {process.stderr}")
+                return f"Subprocess Error: {process.stderr}"
+
+            # Enhanced JSON parsing with fallback and explicit tool name checking
+            output_lines = process.stdout.strip().split("\n")
+            for line in reversed(output_lines):
+                try:
+                    response = json.loads(line)
+                    logger.info(f"✅ Parsed JSON response: {response}")
+
+                    if "result" in response:
+                        return response["result"]
+                    elif "error" in response:
+                        error_message = response["error"]
+                        if "tool not found" in str(error_message).lower():
+                            logger.error(f"🚨 Tool '{tool_name}' not found by service.")
+                            return f"Tool Error: Tool '{tool_name}' not found."
+
+                        logger.error(f"🚨 Tool call error: {error_message}")
+                        return f"Tool Error: {error_message}"
+                    else:
+                        logger.warning("⚠️ Unexpected response structure")
+                        return response
+                except json.JSONDecodeError:
+                    continue
+
+            logger.error("❌ No valid JSON response found")
+            return "Error: No valid JSON response"
+
+        except Exception:
+            logger.critical(f"🔥 Critical tool call error", exc_info=True)
+            return "Critical Error: tool call failure"
+                    
+def load_mcp_tools() -> List[Tool]:
+    """
+    Asynchronously load tools from different MCP services.
+
+    :return: Consolidated list of tools
+    """
+    async def gather_tools():
+        tool_services = [
+            ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"]),
+            ("github-mcp", ["node", "dist/index.js"]),
+            ("google-maps-mcp", ["node", "dist/index.js"]),
+            ("sequentialthinking-mcp", ["node", "dist/index.js"]),
+            ("slack-mcp", ["node", "dist/index.js"]),
+            ("excalidraw-mcp", ["node", "dist/index.js"])
+        ]
+
+        dynamic_tools = []
+        for service, command in tool_services:
+            discovery = MCPToolDiscovery(service, command)
+            tools = await discovery.discover_tools()
+            dynamic_tools.extend(tools)
+
+        # Load local tools
+        local_tools = load_local_tools_from_folder("tools")
+
+        # Combine MCP and local tools
+        all_tools = dynamic_tools + local_tools
+
+        # Filter out None tools
+        valid_tools = [t for t in all_tools if t is not None]
+
+        print("🔧 All bound tools:", [t.name for t in valid_tools])
+
+        return valid_tools
+
+    # Run the async function and get tools
+    return asyncio.run(gather_tools())
+
+async def get_tools_for_service(service_name, command):
+    """Helper function to discover tools for a specific service."""
+    discovery = MCPToolDiscovery(service_name, command)
+    return await discovery.discover_tools()
+
+async def load_all_tools():
+    """Async function to load tools from all services with comprehensive logging."""
+    print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
     
-    def get_tools(self) -> List[Tool]:
-        if not self.discovered_tools:
-            discovered_tool_info = self.discover_tools()
-            self.discovered_tools = [self.create_dynamic_tool(tool_info) for tool_info in discovered_tool_info]
-        return self.discovered_tools
-    
-# Python-based Selector
-selector_discovery = MCPToolDiscovery("selector-mcp", ["python3", "mcp_server.py", "--oneshot"])
-selector_tools = selector_discovery.get_tools()
+    tool_services = [
+        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
+        ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
+    ]
 
-# Node.js-based GitHub
-github_discovery = MCPToolDiscovery(
-    "github-mcp",
-    ["node", "dist/index.js"],
-    discovery_method="list_tools",
-    call_method="call_tool"
-)
-github_tools = github_discovery.get_tools()
+    print("🔍 Checking Docker Containers:")
+    try:
+        # Run docker ps to verify containers
+        docker_ps_result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
+        print(docker_ps_result.stdout)
+    except Exception as e:
+        print(f"❌ Docker PS Error: {e}")
 
+    async def get_tools_for_service(service_name, command, discovery_method, call_method):
+        """Enhanced tool discovery for each service."""
+        print(f"🕵️ Discovering tools for: {service_name}")
+        discovery = MCPToolDiscovery(
+            service_name,
+            command,
+            discovery_method=discovery_method,
+            call_method=call_method
+        )
+        
+        try:
+            discovered_tools = await discovery.discover_tools()
+            print(f"🛠️ Tools for {service_name}: {discovered_tools}")
+            
+            # Convert discovered tools to Tool objects
+            return [
+                Tool(
+                    name=tool['name'],
+                    description=tool.get('description', ''),
+                    func=lambda x, tool_name=tool['name']: f"Placeholder for {tool_name}"
+                ) for tool in discovered_tools
+            ]
+        except Exception as e:
+            print(f"❌ Tool Discovery Error for {service_name}: {e}")
+            return []
 
-# Node.js-based Google Maps
-maps_discovery = MCPToolDiscovery(
-    container_name="google-maps-mcp",
-    command=["node", "dist/index.js"],
-    discovery_method="list_tools",
-    call_method="tools/call"
-)
-maps_tools = maps_discovery.get_tools()
+    try:
+        # Gather tools from all services
+        all_service_tools = await asyncio.gather(
+            *[get_tools_for_service(service, command, discovery_method, call_method)
+              for service, command, discovery_method, call_method in tool_services]
+        )
 
-# Node.js-based Google Maps
-sequentialthinking_discovery = MCPToolDiscovery(
-    container_name="sequentialthinking-mcp",
-    command=["node", "dist/index.js"],
-    discovery_method="tools/list",
-    call_method="tools/call"
-)
-sequentialthinking_tools = sequentialthinking_discovery.get_tools()
+        # Flatten the list of tools
+        dynamic_tools = [tool for service_tools in all_service_tools for tool in service_tools]
 
-# Node.js-based Google Maps
-slack_discovery = MCPToolDiscovery(
-    container_name="slack-mcp",
-    command=["node", "dist/index.js"],
-    discovery_method="tools/list",
-    call_method="tools/call"
-)
-slack_tools = slack_discovery.get_tools()
+        # Add local tools
+        print("🔍 Loading Local Tools:")
+        local_tools = load_local_tools_from_folder("tools")
+        print(f"🧰 Local Tools Found: {[tool.name for tool in local_tools]}")
 
-# Node.js-based Google Maps
-excalidraw_discovery = MCPToolDiscovery(
-    container_name="excalidraw-mcp",
-    command=["node", "dist/index.js"],
-    discovery_method="tools/list",
-    call_method="tools/call"
-)
-excalidraw_tools = excalidraw_discovery.get_tools()
+        # Combine all tools
+        all_tools = dynamic_tools + local_tools
 
-# Local tools from ./tools folder
-local_tools = load_local_tools_from_folder("tools")
+        # Filter out None tools
+        valid_tools = [t for t in all_tools if t is not None]
 
-# Merge all tools
-# Merge all MCP and local tools
-dynamic_tools = (
-    selector_tools +
-    github_tools +
-    maps_tools +
-    sequentialthinking_tools +
-    slack_tools +
-    excalidraw_tools +
-    local_tools  # 👈 your local ping/dig/curl/etc.
-)
+        print("🔧 Comprehensive Tool Discovery Results:")
+        print("✅ All Discovered Tools:", [t.name for t in valid_tools])
 
-valid_tools = [t for t in dynamic_tools if t is not None]
+        if not valid_tools:
+            print("🚨 WARNING: NO TOOLS DISCOVERED 🚨")
+            print("Potential Issues:")
+            print("1. Docker containers not running")
+            print("2. Incorrect discovery methods")
+            print("3. Network/communication issues")
+            print("4. Missing tool configuration")
+
+        return valid_tools
+
+    except Exception as e:
+        print(f"❌ CRITICAL TOOL DISCOVERY ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+# Use asyncio to run the async function and get tools
+valid_tools = asyncio.run(load_all_tools())
 
 print("🔧 All bound tools:", [t.name for t in valid_tools])
 
@@ -419,79 +382,84 @@ def assistant(state: MessagesState):
     tool_call_messages = []
     if hasattr(response, 'tool_calls') and response.tool_calls:
         logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
-        for tool_call in response.tool_calls:
-            tool_name = tool_call['name']
 
-            tool_args = tool_call['args'].copy()
-            logger.info(f"🔍 Tool {tool_name} args from LLM: {tool_args}")
-            tool = next((t for t in valid_tools if t.name == tool_name), None)
+        # Create an async function to handle tool calls
+        async def process_tool_calls():
+            tool_results = []
+            for tool_call in response.tool_calls:
+                tool_name = tool_call['name']
+                tool_args = tool_call['args'].copy()
+                logger.info(f"🛠️ Calling tool '{tool_name}' with args: {tool_args}")
 
-            # ✅ Handle __arg1 mapping
-            if '__arg1' in tool_args and tool:
-                if tool_name in {
-                    "bgp_lookup_tool", "curl_lookup_tool", "dig_tool", 
-                    "nslookup_tool", "ping_tool", "whois_tool", 
-                    "get_location_tool", "traceroute_tool", "threat_check_tool"
-                }:
-                    tool_args = {"ip": tool_args.pop('__arg1')}
-                    logger.info(f"🛠️ Mapped __arg1 to {{'ip': ...}} for tool {tool_name}")
-                elif tool_name in {
-                    "get_drawing", "update_drawing", "delete_drawing", 
-                    "export_to_svg", "export_to_png", "export_to_json"
-                }:
-                    tool_args = {"id": tool_args.pop('__arg1')}
-                    logger.info(f"🛠️ Mapped __arg1 to {{'id': ...}} for tool {tool_name}")
+                # Dynamically choose the right MCP service
+                service_map = {
+                    'maps_geocode': 'google-maps-mcp',
+                    'slack_post_message': 'slack-mcp',
+                    'github-mcp': 'github-mcp',
+                    'google-maps-mcp': 'google-maps-mcp',
+                    'sequentialthinking-mcp': 'sequentialthinking-mcp',
+                    'slack-mcp': 'slack-mcp',
+                    'excalidraw-mcp': 'excalidraw-mcp'
+                    # Add more mappings as needed
+                }
 
-            # ✅ Handle content-based parsing
-            if "content" in tool_args and tool_name in {
-                "get_drawing", "update_drawing", "delete_drawing", 
-                "export_to_svg", "export_to_png", "export_to_json"
-            }:
-                content_raw = tool_args.get("content")
+                container_name = service_map.get(tool_name, 'selector-mcp')
+
+                discovery = MCPToolDiscovery(
+                    container_name,
+                    ["node", "dist/index.js"] if container_name != 'selector-mcp' else ["python3", "mcp_server.py", "--oneshot"]
+                )
+
                 try:
-                    # Try parsing as a dictionary or extracting the ID
-                    if isinstance(content_raw, str):
-                        try:
-                            parsed = ast.literal_eval(content_raw)
-                            tool_args["id"] = parsed.get("id", parsed) if isinstance(parsed, (dict, str)) else content_raw
-                        except (ValueError, SyntaxError):
-                            tool_args["id"] = content_raw
+                    # Determine tool type (Node.js or Python)
+                    tool_types = {
+                        'google-maps-mcp': 'node',
+                        'slack-mcp': 'node',
+                        'github-mcp': 'node',
+                        'sequentialthinking-mcp': 'node',
+                        'excalidraw-mcp': 'node',
+                        'selector-mcp': 'python',
+                        # Add more tool types as needed
+                    }
+                    tool_type = tool_types.get(container_name, 'python')  # Default to python if not found
 
-                    # Validate the input using Pydantic
-                    ExportToJsonInput(id=tool_args["id"])
-                    logger.info(f"🛠️ Validated ID for {tool_name}")
+                    # Format arguments based on tool type
+                    if tool_type == 'node':
+                        normalized_args = {
+                            "__arg1": json.dumps(tool_args) if len(tool_args) > 1 else list(tool_args.values())[0]
+                        }
+                    else:  # Assume Python
+                        normalized_args = tool_args
 
+                    tool_result = await discovery.call_tool(tool_name, normalized_args)
+                    logger.info(f"🛠️ Tool '{tool_name}' result: {tool_result}")
+                    tool_results.append((tool_name, tool_result))
                 except Exception as e:
-                    logger.error(f"🚨 Failed to process ID for {tool_name}: {e}")
-                    # Handle error or raise as needed
+                    logger.error(f"❌ Error calling tool '{tool_name}': {e}", exc_info=True)
+                    tool_results.append((tool_name, f"Error: {e}"))
 
-            tool = next((t for t in valid_tools if t.name == tool_name), None)
+            return tool_results
 
-            if tool:
-                try:
-                    tool_result = tool.run(tool_args)
-                    logger.info(f"Tool {tool_name} result: {tool_result}")
+        # Run the async tool processing
+        tool_call_results = asyncio.run(process_tool_calls())
 
-                    # ✅ Clean result message without tool_calls (prevents infinite loop)
-                    tool_call_messages.append(
-                        AIMessage(content=f"✅ `{tool_name}` executed with result:\n```\n{tool_result}\n```")
-                    )
-
-                except Exception as e:
-                    logger.error(f"Error executing tool {tool_name}: {e}")
-                    tool_call_messages.append(
-                        AIMessage(content=f"❌ Error executing `{tool_name}`: {e}")
-                    )
+        # Convert results to messages
+        for tool_name, result in tool_call_results:
+            tool_call_messages.append(
+                AIMessage(content=f"✅ `{tool_name}` executed with result:\n```\n{result}\n```")
+            )
 
     final_messages = [response] if not tool_call_messages else tool_call_messages
     return {"messages": final_messages}
+
+logging.info("Script started, LangGraph setup commented out.")
 
 # ✅ Build the LangGraph
 builder = StateGraph(MessagesState)
 
 # ✅ Add Nodes
 builder.add_node("assistant", assistant)
-builder.add_node("tools", ToolNode(valid_tools))
+builder.add_node("tools", ToolNode([]))
 
 # ✅ Define Edges (Matches Space Graph)
 builder.add_edge(START, "assistant")
@@ -507,7 +475,7 @@ compiled_graph = builder.compile()
 logger.info("🚀 Packet Copilot LangGraph compiled successfully")
 
 # CLI Loop
-def run_cli_interaction():
+async def run_cli_interaction():
     state = {"messages": []}
     while True:
         user_input = input("User: ")
@@ -519,7 +487,7 @@ def run_cli_interaction():
         state["messages"].append(user_message)
 
         print("🚀 Invoking graph...")
-        result = compiled_graph.invoke(state)
+        result = await compiled_graph.ainvoke(state)  # ainvoke for async
         state = result
 
         for message in reversed(state["messages"]):
@@ -528,4 +496,4 @@ def run_cli_interaction():
                 break
 
 if __name__ == "__main__":
-    run_cli_interaction()
+    asyncio.run(run_cli_interaction())
