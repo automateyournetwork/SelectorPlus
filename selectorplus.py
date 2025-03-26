@@ -135,59 +135,94 @@ class MCPToolDiscovery:
     
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
         """
-        Call a specific tool with given arguments.
-
-        :param tool_name: Name of the tool to call
-        :param arguments: Arguments for the tool
-        :return: Tool execution result
+        Enhanced tool calling method with comprehensive logging and error handling.
         """
-        command = ["docker", "exec", "-i", self.container_name] + self.command
+        logger.info(f"🔍 Attempting to call tool: {tool_name}")
+        logger.info(f"📦 Arguments: {arguments}")
+
+        # Detailed logging of containers and network
         try:
+            network_inspect = subprocess.run(
+                ["docker", "network", "inspect", "bridge"],
+                capture_output=True,
+                text=True,
+            )
+            logger.info(f"🌐 Network Details: {network_inspect.stdout}")
+        except Exception as e:
+            logger.error(f"❌ Network inspection failed: {e}")
+
+        command = ["docker", "exec", "-i", self.container_name] + self.command
+
+        try:
+            # Initialize normalized_args with the original arguments
+            normalized_args = arguments
+
+            # Format arguments based on tool type and tool name
+            if tool_name == 'ask_selector':
+                # Check if arguments has '__arg1' and format as {'content': ...}
+                if "__arg1" in arguments:
+                    normalized_args = {"content": arguments["__arg1"]}
+            elif tool_name == 'excalidraw-mcp' or tool_name == 'slack-mcp' or tool_name == 'google-maps-mcp' or tool_name == 'github-mcp' or tool_name == 'sequentialthinking-mcp':
+                normalized_args = {
+                    "__arg1": json.dumps(arguments) if len(arguments) > 1 else list(arguments.values())[0]
+                }
+
             payload = {
                 "jsonrpc": "2.0",
                 "method": self.call_method,
-                "params": {"name": tool_name, "arguments": arguments},
+                "params": {"name": tool_name, "arguments": normalized_args},
                 "id": "2",
             }
+
+            logger.info(f"🚀 Full Payload: {json.dumps(payload)}")
 
             process = subprocess.run(
                 command,
                 input=json.dumps(payload) + "\n",
                 capture_output=True,
                 text=True,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},  # Ensure unbuffered output
             )
 
-            logger.info(f"📥 STDOUT: {process.stdout}")
-            if process.stderr:
-                logger.error(f"🚨 STDERR: {process.stderr}")
+            logger.info(f"🔬 Subprocess Exit Code: {process.returncode}")
+            logger.info(f"🔬 Full subprocess stdout: {process.stdout}")
+            logger.info(f"🔬 Full subprocess stderr: {process.stderr}")
 
-            # Parse the output
-            if process.stdout:
-                output = process.stdout.strip()
-                # Find the last valid JSON object
-                json_lines = []
-                for line in reversed(output.splitlines()):
-                    line = line.strip()
-                    if line.startswith("{") or line.startswith("["):
-                        try:
-                            json_lines.append(json.loads(line))
-                            break
-                        except json.JSONDecodeError:
-                            logger.warning(f"Ignoring invalid JSON line: {line}")
-                    if json_lines:
-                        response = json_lines[0]
-                        logger.info(f"Parsed JSON response: {response}")
-                        return response.get("result")  # Or whatever field you need
+            if process.returncode != 0:
+                logger.error(f"❌ Subprocess returned non-zero exit code: {process.returncode}")
+                logger.error(f"🚨 Error Details: {process.stderr}")
+                return f"Subprocess Error: {process.stderr}"
+
+            # Enhanced JSON parsing with fallback and explicit tool name checking
+            output_lines = process.stdout.strip().split("\n")
+            for line in reversed(output_lines):
+                try:
+                    response = json.loads(line)
+                    logger.info(f"✅ Parsed JSON response: {response}")
+
+                    if "result" in response:
+                        return response["result"]
+                    elif "error" in response:
+                        error_message = response["error"]
+                        if "tool not found" in str(error_message).lower():
+                            logger.error(f"🚨 Tool '{tool_name}' not found by service.")
+                            return f"Tool Error: Tool '{tool_name}' not found."
+
+                        logger.error(f"🚨 Tool call error: {error_message}")
+                        return f"Tool Error: {error_message}"
                     else:
-                        logger.error("No valid JSON found in output")
-                        return None
-                else:
-                    logger.error("No output from subprocess")
-                    return None
-        except Exception as e:
-            logger.error(f"Error calling tool {tool_name}: {e}", exc_info=True)
-            return None
+                        logger.warning("⚠️ Unexpected response structure")
+                        return response
+                except json.JSONDecodeError:
+                    continue
 
+            logger.error("❌ No valid JSON response found")
+            return "Error: No valid JSON response"
+
+        except Exception:
+            logger.critical(f"🔥 Critical tool call error", exc_info=True)
+            return "Critical Error: tool call failure"
+                    
 def load_mcp_tools() -> List[Tool]:
     """
     Asynchronously load tools from different MCP services.
@@ -232,56 +267,91 @@ async def get_tools_for_service(service_name, command):
     return await discovery.discover_tools()
 
 async def load_all_tools():
-    """Async function to load tools from all services."""
+    """Async function to load tools from all services with comprehensive logging."""
+    print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
+    
     tool_services = [
         ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("github-mcp", ["node", "dist/index.js"], "list_tools", "tools/call"),
+        ("github-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
     ]
 
+    print("🔍 Checking Docker Containers:")
+    try:
+        # Run docker ps to verify containers
+        docker_ps_result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
+        print(docker_ps_result.stdout)
+    except Exception as e:
+        print(f"❌ Docker PS Error: {e}")
+
     async def get_tools_for_service(service_name, command, discovery_method, call_method):
-        """Helper function to discover tools for a specific service."""
+        """Enhanced tool discovery for each service."""
+        print(f"🕵️ Discovering tools for: {service_name}")
         discovery = MCPToolDiscovery(
             service_name,
             command,
             discovery_method=discovery_method,
             call_method=call_method
         )
-        discovered_tools = await discovery.discover_tools()
+        
+        try:
+            discovered_tools = await discovery.discover_tools()
+            print(f"🛠️ Tools for {service_name}: {discovered_tools}")
+            
+            # Convert discovered tools to Tool objects
+            return [
+                Tool(
+                    name=tool['name'],
+                    description=tool.get('description', ''),
+                    func=lambda x, tool_name=tool['name']: f"Placeholder for {tool_name}"
+                ) for tool in discovered_tools
+            ]
+        except Exception as e:
+            print(f"❌ Tool Discovery Error for {service_name}: {e}")
+            return []
 
-        # Convert discovered tools to Tool objects
-        return [
-            Tool(
-                name=tool['name'],
-                description=tool.get('description', ''),
-                func=lambda x: x  # Placeholder function, replace with actual implementation
-            ) for tool in discovered_tools
-        ]
+    try:
+        # Gather tools from all services
+        all_service_tools = await asyncio.gather(
+            *[get_tools_for_service(service, command, discovery_method, call_method)
+              for service, command, discovery_method, call_method in tool_services]
+        )
 
-    # Gather tools from all services
-    all_service_tools = await asyncio.gather(
-        *[get_tools_for_service(service, command, discovery_method, call_method)
-          for service, command, discovery_method, call_method in tool_services]
-    )
+        # Flatten the list of tools
+        dynamic_tools = [tool for service_tools in all_service_tools for tool in service_tools]
 
-    # Flatten the list of tools
-    dynamic_tools = [tool for service_tools in all_service_tools for tool in service_tools]
+        # Add local tools
+        print("🔍 Loading Local Tools:")
+        local_tools = load_local_tools_from_folder("tools")
+        print(f"🧰 Local Tools Found: {[tool.name for tool in local_tools]}")
 
-    # Add local tools
-    local_tools = load_local_tools_from_folder("tools")
+        # Combine all tools
+        all_tools = dynamic_tools + local_tools
 
-    # Combine all tools
-    all_tools = dynamic_tools + local_tools
+        # Filter out None tools
+        valid_tools = [t for t in all_tools if t is not None]
 
-    # Filter out None tools
-    valid_tools = [t for t in all_tools if t is not None]
+        print("🔧 Comprehensive Tool Discovery Results:")
+        print("✅ All Discovered Tools:", [t.name for t in valid_tools])
 
-    print("🔧 All bound tools:", [t.name for t in valid_tools])
+        if not valid_tools:
+            print("🚨 WARNING: NO TOOLS DISCOVERED 🚨")
+            print("Potential Issues:")
+            print("1. Docker containers not running")
+            print("2. Incorrect discovery methods")
+            print("3. Network/communication issues")
+            print("4. Missing tool configuration")
 
-    return valid_tools
+        return valid_tools
+
+    except Exception as e:
+        print(f"❌ CRITICAL TOOL DISCOVERY ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
 
 # Use asyncio to run the async function and get tools
 valid_tools = asyncio.run(load_all_tools())
@@ -320,30 +390,53 @@ def assistant(state: MessagesState):
                 tool_name = tool_call['name']
                 tool_args = tool_call['args'].copy()
                 logger.info(f"🛠️ Calling tool '{tool_name}' with args: {tool_args}")
-                # Find the corresponding MCP discovery instance
-                discovery = next((
-                    MCPToolDiscovery(service, command)
-                    for service, command in [
-                        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"]),
-                        ("github-mcp", ["node", "dist/index.js"]),
-                        ("google-maps-mcp", ["node", "dist/index.js"]),
-                        ("sequentialthinking-mcp", ["node", "dist/index.js"]),
-                        ("slack-mcp", ["node", "dist/index.js"]),
-                        ("excalidraw-mcp", ["node", "dist/index.js"])
-                    ] if service in tool_name
-                ), None)
 
-                if discovery:
-                    try:
-                        tool_result = await discovery.call_tool(tool_name, tool_args)
-                        logger.info(f"🛠️ Tool '{tool_name}' result: {tool_result}")  # ADDED
-                        tool_results.append((tool_name, tool_result))
-                    except Exception as e:
-                        logger.error(f"❌ Error calling tool '{tool_name}': {e}", exc_info=True)  # ADDED
-                        tool_results.append((tool_name, f"Error: {e}"))
-                else:
-                    logger.warning(f"⚠️ Tool '{tool_name}' not found.")  # ADDED
-                    tool_results.append((tool_name, "Tool not found"))
+                # Dynamically choose the right MCP service
+                service_map = {
+                    'maps_geocode': 'google-maps-mcp',
+                    'slack_post_message': 'slack-mcp',
+                    'github-mcp': 'github-mcp',
+                    'google-maps-mcp': 'google-maps-mcp',
+                    'sequentialthinking-mcp': 'sequentialthinking-mcp',
+                    'slack-mcp': 'slack-mcp',
+                    'excalidraw-mcp': 'excalidraw-mcp'
+                    # Add more mappings as needed
+                }
+
+                container_name = service_map.get(tool_name, 'selector-mcp')
+
+                discovery = MCPToolDiscovery(
+                    container_name,
+                    ["node", "dist/index.js"] if container_name != 'selector-mcp' else ["python3", "mcp_server.py", "--oneshot"]
+                )
+
+                try:
+                    # Determine tool type (Node.js or Python)
+                    tool_types = {
+                        'google-maps-mcp': 'node',
+                        'slack-mcp': 'node',
+                        'github-mcp': 'node',
+                        'sequentialthinking-mcp': 'node',
+                        'excalidraw-mcp': 'node',
+                        'selector-mcp': 'python',
+                        # Add more tool types as needed
+                    }
+                    tool_type = tool_types.get(container_name, 'python')  # Default to python if not found
+
+                    # Format arguments based on tool type
+                    if tool_type == 'node':
+                        normalized_args = {
+                            "__arg1": json.dumps(tool_args) if len(tool_args) > 1 else list(tool_args.values())[0]
+                        }
+                    else:  # Assume Python
+                        normalized_args = tool_args
+
+                    tool_result = await discovery.call_tool(tool_name, normalized_args)
+                    logger.info(f"🛠️ Tool '{tool_name}' result: {tool_result}")
+                    tool_results.append((tool_name, tool_result))
+                except Exception as e:
+                    logger.error(f"❌ Error calling tool '{tool_name}': {e}", exc_info=True)
+                    tool_results.append((tool_name, f"Error: {e}"))
 
             return tool_results
 
