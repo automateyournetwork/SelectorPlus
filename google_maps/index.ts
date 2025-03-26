@@ -8,7 +8,7 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import fetch from "node-fetch";
-import { z } from "zod"; // Import zod
+import { z } from "zod";
 
 // Response interfaces (using zod for stronger type safety)
 const GoogleMapsResponseSchema = z.object({
@@ -222,6 +222,7 @@ async function handleElevation(locations: Array<{ latitude: number; longitude: n
 }
 
 // Server setup
+// Server setup
 const server = new Server(
   {
     name: "mcp-server/google-maps",
@@ -238,22 +239,61 @@ console.log("✅ Server initialized");
 
 console.log("🔧 Registering list_tools handler...");
 
+
+// Modify the server initialization
+// Create the server
+const mcpServer = new Server(
+  {
+    name: "mcp-server/google-maps",
+    version: "0.1.0",
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  },
+);
+
+console.log("✅ Server initialized");
+
+console.log("🔧 Registering list_tools handler...");
+
 // Set up request handlers
-server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-  console.log("✅ list_tools handler is RUNNING!");
-  console.log("📩 Registered tools:", MAPS_TOOLS);
-  return {
-    tools: MAPS_TOOLS.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })),
-  };
+mcpServer.setRequestHandler(ListToolsRequestSchema, async (request) => {
+  console.error('🔍 FULL REQUEST DETAILS:', JSON.stringify(request, null, 2));
+  console.error('🔍 Request Method:', request.method);
+  console.error('🔍 Request Keys:', Object.keys(request));
+  console.error(`Received method: '${request.method}'`);
+
+  try {
+    const allowedMethods = ["list_tools", "tools/list", "tools/discover"];
+    if (!allowedMethods.includes(request.method)) {
+      console.error(`❌ Unsupported method: ${request.method}`);
+      throw new Error(`Unsupported method: ${request.method}`);
+    }
+
+    const toolResponse = {
+      tools: MAPS_TOOLS.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    };
+    
+    console.error('✅ Tool Response:', JSON.stringify(toolResponse, null, 2));
+    return { tools: toolResponse.tools };
+  } catch (error) {
+    console.error("❌ Error in tool discovery:", error);
+    return {
+      tools: [], 
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
 });
 
 console.log("🔧 Registering call_tool handler...");
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   console.log("📩 Received call_tool request:", JSON.stringify(request, null, 2));
   console.log("Request Arguments: ", JSON.stringify(request.params.arguments));
   try {
@@ -308,12 +348,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 });
+
 console.log("✅ Successfully registered call_tool handler.");
 
 async function runServer() {
   console.log("🚀 Starting Google Maps MCP Server...");
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await mcpServer.connect(transport);
   console.log("✅ Google Maps MCP Server running on stdio");
   process.stderr.write("✅ Server ready to process requests\n");
 }
