@@ -232,17 +232,36 @@ async def get_tools_for_service(service_name, command):
 async def load_all_tools():
     """Async function to load tools from all services."""
     tool_services = [
-        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"]),
-        ("github-mcp", ["node", "dist/index.js"]),
-        ("google-maps-mcp", ["node", "dist/index.js"]),
-        ("sequentialthinking-mcp", ["node", "dist/index.js"]),
-        ("slack-mcp", ["node", "dist/index.js"]),
-        ("excalidraw-mcp", ["node", "dist/index.js"])
+        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover"),
+        ("github-mcp", ["node", "dist/index.js"], "list_tools"),
+        ("google-maps-mcp", ["node", "dist/index.js"], "list_tools"),
+        ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list"),
+        ("slack-mcp", ["node", "dist/index.js"], "tools/list"),
+        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list")
     ]
+    
+    async def get_tools_for_service(service_name, command, discovery_method):
+        """Helper function to discover tools for a specific service."""
+        discovery = MCPToolDiscovery(
+            service_name, 
+            command, 
+            discovery_method=discovery_method
+        )
+        discovered_tools = await discovery.discover_tools()
+        
+        # Convert discovered tools to Tool objects
+        return [
+            Tool(
+                name=tool['name'], 
+                description=tool.get('description', ''),
+                func=lambda x: x  # Placeholder function, replace with actual implementation
+            ) for tool in discovered_tools
+        ]
     
     # Gather tools from all services
     all_service_tools = await asyncio.gather(
-        *[get_tools_for_service(service, command) for service, command in tool_services]
+        *[get_tools_for_service(service, command, discovery_method) 
+          for service, command, discovery_method in tool_services]
     )
     
     # Flatten the list of tools
@@ -270,6 +289,7 @@ print("🔧 All bound tools:", [t.name for t in valid_tools])
 llm = ChatOpenAI(model="gpt-4o")
 
 llm_with_tools = llm.bind_tools(valid_tools, parallel_tool_calls=False)
+
 # System Message
 sys_msg = SystemMessage(content="You are an AI assistant with dynamically discovered tools.")
 
