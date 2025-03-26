@@ -20,6 +20,8 @@ if not SELECTOR_URL or not SELECTOR_AI_API_KEY:
 
 SELECTOR_API_URL = f"{SELECTOR_URL}/api/collab2-slack/copilot/v1/chat"
 
+logger.info(f"SELECTOR_API_URL value: {SELECTOR_API_URL}") 
+
 class SelectorClient:
     def __init__(self):
         self.api_url = SELECTOR_API_URL

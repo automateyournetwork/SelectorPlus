@@ -60,12 +60,6 @@ def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
         func=wrapper,
     )
 
-class FlexibleInput(BaseModel):
-    content: Union[str, Dict[str, Any]] = Field(
-        default=None,
-        description="Flexible input that can be a string or dictionary, used to ask Selector something."
-    )
-
 class MCPToolDiscovery:
     def __init__(self, container_name: str, command: List[str], discovery_method: str = "tools/discover", call_method: str = "tools/call"):
         self.container_name = container_name
@@ -146,12 +140,11 @@ class MCPToolDiscovery:
     def create_dynamic_tool(self, tool_info: Dict[str, Any]) -> Tool:
         tool_name = tool_info["name"]   
 
-        # Flexible input model for most tools
         class FlexibleInput(BaseModel):
             content: Union[str, Dict[str, Any]] = Field(
-                default=None, 
-                description="Flexible input that can be a string or a dictionary"
-            )   
+                default=None,
+                description="Flexible input that can be a string or dictionary, used to ask Selector something."
+            )
 
         # Specific input model for GitHub file creation
         class GitHubFileInput(BaseModel):
@@ -203,10 +196,12 @@ class MCPToolDiscovery:
         def dynamic_tool_function(content: Union[str, Dict[str, Any]] = None, **kwargs):
             logger.info(f"⚙️ Calling tool: {tool_name}")
             logger.info(f"🔍 Full kwargs received: {kwargs}")
-        
+
             try:
-                payload_arguments = kwargs.copy()  # Use a copy of kwargs as the base
-        
+                payload_arguments = {}  # Initialize as empty dict
+                if content:
+                  payload_arguments['content'] = content
+
                 # Special handling for create_or_update_file
                 if tool_name == "create_or_update_file":
                     # Check if content exists in the original tool calls
@@ -214,16 +209,16 @@ class MCPToolDiscovery:
                         payload_arguments['content'] = kwargs['content']
                     elif content:
                         payload_arguments['content'] = content
-        
+
                     # Fallback to default if no content
                     if 'content' not in payload_arguments or not payload_arguments['content']:
                         logger.warning("No content found. Using default content.")
                         payload_arguments['content'] = "Default health report content for Selector Device S3"
-        
+
                     # Ensure 'branch' is always provided
                     if 'branch' not in payload_arguments:
                         payload_arguments['branch'] = 'main'  # Default branch
-        
+
                     logger.info(f"🚀 Final payload_arguments for file creation: {payload_arguments}")
                 elif tool_name == "sequentialthinking":
                     # ✅ Use all structured fields already passed through args
@@ -248,36 +243,45 @@ class MCPToolDiscovery:
                         payload_arguments["name"] = "AI Drawing"
                     logger.info(f"🖌️ Final payload_arguments for drawing: {payload_arguments}")
 
+                elif tool_name == "ask_selector":
+                    if content:
+                        payload_arguments["content"] = content
+                    else:
+                      logger.warning(f"⚠️ No content provided for ask_selector. Using default empty string")
+                      payload_arguments['content'] = ""
+
+                    logger.info(f"🔍 ask_selector arguments: {payload_arguments}")
+
                 payload = {
                     "jsonrpc": "2.0",
                     "method": self.call_method,
                     "params": {"name": tool_name, "arguments": payload_arguments},
                     "id": "2",
                 }
-        
+
                 logger.info(f"📤 Payload: {json.dumps(payload, indent=2)}")
-        
+
                 process = subprocess.run(
                     ["docker", "exec", "-i", self.container_name] + self.command,
                     input=json.dumps(payload) + "\n",
                     capture_output=True,
                     text=True,
                 )
-        
+
                 logger.info(f"📥 STDOUT: {process.stdout}")
                 if process.stderr:
                     logger.error(f"🚨 STDERR: {process.stderr}")
-        
+
                 stdout_lines = process.stdout.strip().split("\n")
                 if stdout_lines:
                     last_line = stdout_lines[-1]
                     try:
                         response = json.loads(last_line)
                         logger.info(f"📝 Full Response: {json.dumps(response, indent=2)}")
-        
+
                         result = response.get("result", {})
                         content = result.get("content", str(result))
-        
+
                         logger.info(f"✅ Result content: {content}")
                         return content
                     except json.JSONDecodeError as e:
@@ -286,7 +290,7 @@ class MCPToolDiscovery:
                 else:
                     logger.warning("❌ No response lines received.")
                     return "No response from tool"
-        
+
             except Exception as e:
                 logger.error(f"❌ Execution error: {e}")
                 return f"Execution error: {e}"
@@ -419,6 +423,7 @@ def assistant(state: MessagesState):
             tool_name = tool_call['name']
 
             tool_args = tool_call['args'].copy()
+            logger.info(f"🔍 Tool {tool_name} args from LLM: {tool_args}")
             tool = next((t for t in valid_tools if t.name == tool_name), None)
 
             # ✅ Handle __arg1 mapping
