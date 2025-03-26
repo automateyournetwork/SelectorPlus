@@ -154,45 +154,45 @@ def load_mcp_tools() -> List[Tool]:
     # Run the async function and get tools
     return asyncio.run(gather_tools())
 
-# Python-based Selector
-selector_discovery = MCPToolDiscovery("selector-mcp")
-selector_tools = selector_discovery.get_tools()
+async def get_tools_for_service(service_name, command):
+    """Helper function to discover tools for a specific service."""
+    discovery = MCPToolDiscovery(service_name, command)
+    return await discovery.discover_tools()
 
-# Node.js-based GitHub
-github_discovery = MCPToolDiscovery("github-mcp")
-github_tools = github_discovery.get_tools()
+async def load_all_tools():
+    """Async function to load tools from all services."""
+    tool_services = [
+        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"]),
+        ("github-mcp", ["node", "dist/index.js"]),
+        ("google-maps-mcp", ["node", "dist/index.js"]),
+        ("sequentialthinking-mcp", ["node", "dist/index.js"]),
+        ("slack-mcp", ["node", "dist/index.js"]),
+        ("excalidraw-mcp", ["node", "dist/index.js"])
+    ]
+    
+    # Gather tools from all services
+    all_service_tools = await asyncio.gather(
+        *[get_tools_for_service(service, command) for service, command in tool_services]
+    )
+    
+    # Flatten the list of tools
+    dynamic_tools = [tool for service_tools in all_service_tools for tool in service_tools]
+    
+    # Add local tools
+    local_tools = load_local_tools_from_folder("tools")
+    
+    # Combine all tools
+    all_tools = dynamic_tools + local_tools
+    
+    # Filter out None tools
+    valid_tools = [t for t in all_tools if t is not None]
+    
+    print("🔧 All bound tools:", [t.name for t in valid_tools])
+    
+    return valid_tools
 
-# Node.js-based Google Maps
-maps_discovery = MCPToolDiscovery("google-maps-mcp")
-maps_tools = maps_discovery.get_tools()
-
-# Node.js-based Sequential Thinking
-sequentialthinking_discovery = MCPToolDiscovery("sequentialthinking-mcp")
-sequentialthinking_tools = sequentialthinking_discovery.get_tools()
-
-# Node.js-based Slack
-slack_discovery = MCPToolDiscovery("slack-mcp")
-slack_tools = slack_discovery.get_tools()
-
-# Node.js-based Excalidraw
-excalidraw_discovery = MCPToolDiscovery("excalidraw-mcp")
-excalidraw_tools = excalidraw_discovery.get_tools()
-
-# Local tools from ./tools folder
-local_tools = load_local_tools_from_folder("tools")
-
-# Merge all tools
-dynamic_tools = (
-    selector_tools +
-    github_tools +
-    maps_tools +
-    sequentialthinking_tools +
-    slack_tools +
-    excalidraw_tools +
-    local_tools  # 👈 your local ping/dig/curl/etc.
-)
-
-valid_tools = load_mcp_tools()
+# Use asyncio to run the async function and get tools
+valid_tools = asyncio.run(load_all_tools())
 
 print("🔧 All bound tools:", [t.name for t in valid_tools])
 
