@@ -25,43 +25,43 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def load_local_tools_from_folder(folder_path: str) -> List[Tool]:
-    local_tools = []
+# def load_local_tools_from_folder(folder_path: str) -> List[Tool]:
+#     local_tools = []
 
-    for filename in os.listdir(folder_path):
-        if filename.endswith(".py") and not filename.startswith("__"):
-            module_name = filename[:-3]
-            try:
-                module = importlib.import_module(f"{folder_path}.{module_name}")
-                for name, obj in inspect.getmembers(module):
-                    if isinstance(obj, Tool):
-                        wrapped = wrap_dict_input_tool(obj)
-                        local_tools.append(wrapped)
-                        print(f"✅ Loaded local tool: {wrapped.name}")
-                    elif isinstance(obj, StructuredTool):
-                        local_tools.append(obj)
-                        print(f"✅ Loaded structured tool: {obj.name}")
-            except Exception as e:
-                print(f"❌ Failed to import {module_name}: {e}")
-    return local_tools
+#     for filename in os.listdir(folder_path):
+#         if filename.endswith(".py") and not filename.startswith("__"):
+#             module_name = filename[:-3]
+#             try:
+#                 module = importlib.import_module(f"{folder_path}.{module_name}")
+#                 for name, obj in inspect.getmembers(module):
+#                     if isinstance(obj, Tool):
+#                         wrapped = wrap_dict_input_tool(obj)
+#                         local_tools.append(wrapped)
+#                         print(f"✅ Loaded local tool: {wrapped.name}")
+#                     elif isinstance(obj, StructuredTool):
+#                         local_tools.append(obj)
+#                         print(f"✅ Loaded structured tool: {obj.name}")
+#             except Exception as e:
+#                 print(f"❌ Failed to import {module_name}: {e}")
+#     return local_tools
 
-def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
-    original_func = tool_obj.func
+# def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
+#     original_func = tool_obj.func
 
-    @wraps(original_func)
-    def wrapper(input_value):
-        if isinstance(input_value, str):
-            input_value = {"ip": input_value}
-        elif isinstance(input_value, dict) and "ip" not in input_value:
-            # You could log or raise a warning here if needed
-            logger.warning(f"⚠️ Missing 'ip' key in dict: {input_value}")
-        return original_func(input_value)
+#     @wraps(original_func)
+#     def wrapper(input_value):
+#         if isinstance(input_value, str):
+#             input_value = {"ip": input_value}
+#         elif isinstance(input_value, dict) and "ip" not in input_value:
+#             # You could log or raise a warning here if needed
+#             logger.warning(f"⚠️ Missing 'ip' key in dict: {input_value}")
+#         return original_func(input_value)
 
-    return Tool(
-        name=tool_obj.name,
-        description=tool_obj.description,
-        func=wrapper,
-    )
+#     return Tool(
+#         name=tool_obj.name,
+#         description=tool_obj.description,
+#         func=wrapper,
+#     )
 
 class MCPToolDiscovery:
     def __init__(self, service_name: str, command: List[str] = None):
@@ -76,9 +76,11 @@ class MCPToolDiscovery:
             command=command[0] if command else "python",
             args=command[1:] if command and len(command) > 1 else [],
         )
+        logging.info(f"Server params: {self.server_params}")
         self.discovered_tools = []
 
     async def discover_tools(self) -> List[Dict[str, Any]]:
+        logging.info(f"Attempting to connect to stdio_client for {self.service_name}")
         """
         Discover tools for the specified service.
         
@@ -86,6 +88,7 @@ class MCPToolDiscovery:
         """
         async with stdio_client(self.server_params) as (read, write):
             async with ClientSession(read, write) as session:
+                logging.info("here")
                 try:
                     # List available tools
                     tools = await session.list_tools()
@@ -111,10 +114,11 @@ class MCPToolDiscovery:
         async with stdio_client(self.server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 try:
-                    result = await session.call_tool(tool_name, arguments=arguments)
-                    return result
+                        result = await session.call_tool(tool_name, arguments=arguments)
+                        logger.info(f"✅ Tool '{tool_name}' on service '{self.service_name}' returned: {result}") # ADDED
+                        return result
                 except Exception as e:
-                    print(f"❌ Error calling tool {tool_name}: {e}")
+                    logger.error(f"❌ Error calling tool '{tool_name}' on service '{self.service_name}': {e}", exc_info=True) # ADDED
                     return None
 
 def load_mcp_tools() -> List[Tool]:
@@ -227,7 +231,7 @@ def assistant(state: MessagesState):
             for tool_call in response.tool_calls:
                 tool_name = tool_call['name']
                 tool_args = tool_call['args'].copy()
-                
+                logger.info(f"🛠️ Calling tool '{tool_name}' with args: {tool_args}")
                 # Find the corresponding MCP discovery instance
                 discovery = next((
                     MCPToolDiscovery(service, command) 
@@ -242,14 +246,17 @@ def assistant(state: MessagesState):
                 ), None)
                 
                 if discovery:
-                    try:
-                        tool_result = await discovery.call_tool(tool_name, tool_args)
-                        tool_results.append((tool_name, tool_result))
-                    except Exception as e:
-                        tool_results.append((tool_name, f"Error: {e}"))
+                     try:
+                         tool_result = await discovery.call_tool(tool_name, tool_args)
+                         logger.info(f"🛠️ Tool '{tool_name}' result: {tool_result}") # ADDED
+                         tool_results.append((tool_name, tool_result))
+                     except Exception as e:
+                         logger.error(f"❌ Error calling tool '{tool_name}': {e}", exc_info=True) # ADDED
+                         tool_results.append((tool_name, f"Error: {e}"))
                 else:
+                    logger.warning(f"⚠️ Tool '{tool_name}' not found.") # ADDED
                     tool_results.append((tool_name, "Tool not found"))
-            
+
             return tool_results
 
         # Run the async tool processing
@@ -264,12 +271,14 @@ def assistant(state: MessagesState):
     final_messages = [response] if not tool_call_messages else tool_call_messages
     return {"messages": final_messages}
 
+logging.info("Script started, LangGraph setup commented out.")
+
 # ✅ Build the LangGraph
 builder = StateGraph(MessagesState)
 
 # ✅ Add Nodes
 builder.add_node("assistant", assistant)
-builder.add_node("tools", ToolNode(valid_tools))
+builder.add_node("tools", ToolNode([]))
 
 # ✅ Define Edges (Matches Space Graph)
 builder.add_edge(START, "assistant")
@@ -285,7 +294,7 @@ compiled_graph = builder.compile()
 logger.info("🚀 Packet Copilot LangGraph compiled successfully")
 
 # CLI Loop
-def run_cli_interaction():
+async def run_cli_interaction():
     state = {"messages": []}
     while True:
         user_input = input("User: ")
@@ -297,7 +306,7 @@ def run_cli_interaction():
         state["messages"].append(user_message)
 
         print("🚀 Invoking graph...")
-        result = compiled_graph.invoke(state)
+        result = await compiled_graph.ainvoke(state) # ainvoke for async
         state = result
 
         for message in reversed(state["messages"]):
@@ -306,4 +315,4 @@ def run_cli_interaction():
                 break
 
 if __name__ == "__main__":
-    run_cli_interaction()
+    asyncio.run(run_cli_interaction())
