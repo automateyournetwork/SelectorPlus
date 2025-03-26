@@ -2,6 +2,7 @@ import os
 import re
 import ast
 import json
+import asyncio
 import inspect
 import logging
 import importlib
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain.tools import Tool, StructuredTool
 from typing import Dict, Any, List, Optional, Union
+from mcp import ClientSession, StdioServerParameters, types
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.prebuilt.tool_node import tools_condition, ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -60,89 +62,97 @@ def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
         func=wrapper,
     )
 
-from typing import List, Dict, Any
-from anthropic.mcp import MCPClient, Tool
-
 class MCPToolDiscovery:
-    def __init__(self, service_name: str):
+    def __init__(self, service_name: str, command: List[str] = None):
         """
-        Initialize MCP Tool Discovery with a service name.
+        Initialize MCP Tool Discovery for a specific service.
         
-        :param service_name: Name of the MCP service to discover tools from
+        :param service_name: Name of the MCP service
+        :param command: Optional command to start the service
         """
-        self.client = MCPClient()
         self.service_name = service_name
+        self.server_params = StdioServerParameters(
+            command=command[0] if command else "python",
+            args=command[1:] if command and len(command) > 1 else [],
+        )
         self.discovered_tools = []
 
-    def discover_tools(self) -> List[Dict[str, Any]]:
+    async def discover_tools(self) -> List[Dict[str, Any]]:
         """
-        Discover tools for the specified service using MCP Client.
+        Discover tools for the specified service.
         
         :return: List of discovered tool definitions
         """
-        try:
-            # Use MCP Client to discover tools for the service
-            tools = self.client.discover_tools(self.service_name)
-            
-            # Log discovered tools
-            print(f"🔍 Discovered {len(tools)} tools for {self.service_name}")
-            for tool in tools:
-                print(f"✅ Tool: {tool['name']} - {tool.get('description', 'No description')}")
-            
-            return tools
-        
-        except Exception as e:
-            print(f"❌ Error discovering tools for {self.service_name}: {e}")
-            return []
+        async with stdio_client(self.server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                try:
+                    # List available tools
+                    tools = await session.list_tools()
+                    
+                    print(f"🔍 Discovered {len(tools)} tools for {self.service_name}")
+                    for tool in tools:
+                        print(f"✅ Tool: {tool.name} - {tool.description}")
+                    
+                    return tools
+                
+                except Exception as e:
+                    print(f"❌ Error discovering tools for {self.service_name}: {e}")
+                    return []
 
-    def get_tools(self) -> List[Tool]:
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
         """
-        Get discovered tools, caching them for subsequent calls.
+        Call a specific tool with given arguments.
         
-        :return: List of Tool objects
+        :param tool_name: Name of the tool to call
+        :param arguments: Arguments for the tool
+        :return: Tool execution result
         """
-        if not self.discovered_tools:
-            discovered_tool_info = self.discover_tools()
-            self.discovered_tools = [
-                self.client.create_tool(tool_info) 
-                for tool_info in discovered_tool_info
-            ]
-        
-        return self.discovered_tools
+        async with stdio_client(self.server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                try:
+                    result = await session.call_tool(tool_name, arguments=arguments)
+                    return result
+                except Exception as e:
+                    print(f"❌ Error calling tool {tool_name}: {e}")
+                    return None
 
-# Example usage
 def load_mcp_tools() -> List[Tool]:
     """
-    Load tools from different MCP services.
+    Asynchronously load tools from different MCP services.
     
     :return: Consolidated list of tools
     """
-    tool_services = [
-        "selector-mcp",
-        "github-mcp", 
-        "google-maps-mcp", 
-        "sequentialthinking-mcp", 
-        "slack-mcp", 
-        "excalidraw-mcp"
-    ]
-    
-    dynamic_tools = []
-    for service in tool_services:
-        discovery = MCPToolDiscovery(service)
-        dynamic_tools.extend(discovery.get_tools())
-    
-    # Load local tools as before
-    local_tools = load_local_tools_from_folder("tools")
-    
-    # Combine MCP and local tools
-    all_tools = dynamic_tools + local_tools
-    
-    # Filter out None tools
-    valid_tools = [t for t in all_tools if t is not None]
-    
-    print("🔧 All bound tools:", [t.name for t in valid_tools])
-    
-    return valid_tools
+    async def gather_tools():
+        tool_services = [
+            ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"]),
+            ("github-mcp", ["node", "dist/index.js"]),
+            ("google-maps-mcp", ["node", "dist/index.js"]),
+            ("sequentialthinking-mcp", ["node", "dist/index.js"]),
+            ("slack-mcp", ["node", "dist/index.js"]),
+            ("excalidraw-mcp", ["node", "dist/index.js"])
+        ]
+        
+        dynamic_tools = []
+        for service, command in tool_services:
+            discovery = MCPToolDiscovery(service, command)
+            tools = await discovery.discover_tools()
+            dynamic_tools.extend(tools)
+        
+        # Load local tools
+        local_tools = load_local_tools_from_folder("tools")
+        
+        # Combine MCP and local tools
+        all_tools = dynamic_tools + local_tools
+        
+        # Filter out None tools
+        valid_tools = [t for t in all_tools if t is not None]
+        
+        print("🔧 All bound tools:", [t.name for t in valid_tools])
+        
+        return valid_tools
+
+    # Run the async function and get tools
+    return asyncio.run(gather_tools())
 
 # Python-based Selector
 selector_discovery = MCPToolDiscovery("selector-mcp")
@@ -182,7 +192,7 @@ dynamic_tools = (
     local_tools  # 👈 your local ping/dig/curl/etc.
 )
 
-valid_tools = [t for t in dynamic_tools if t is not None]
+valid_tools = load_mcp_tools()
 
 print("🔧 All bound tools:", [t.name for t in valid_tools])
 
@@ -204,42 +214,51 @@ def assistant(state: MessagesState):
 
     logger.info(f"🛠️ Processing Message: {latest_user_message.content}")
     new_messages = [sys_msg] + messages
-    
-    try:
-        response = llm_with_tools.invoke(new_messages)
-    except Exception as e:
-        logger.error(f"❌ LLM Invocation Error: {e}")
-        return {"messages": [AIMessage(content=f"🚨 Error processing your request: {e}")]}
+    response = llm_with_tools.invoke(new_messages)
 
     tool_call_messages = []
     if hasattr(response, 'tool_calls') and response.tool_calls:
         logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
-        for tool_call in response.tool_calls:
-            tool_name = tool_call['name']
-
-            tool_args = tool_call['args'].copy()
-            logger.info(f"🔍 Tool {tool_name} args from LLM: {tool_args}")
+        
+        # Create an async function to handle tool calls
+        async def process_tool_calls():
+            tool_results = []
+            for tool_call in response.tool_calls:
+                tool_name = tool_call['name']
+                tool_args = tool_call['args'].copy()
+                
+                # Find the corresponding MCP discovery instance
+                discovery = next((
+                    MCPToolDiscovery(service, command) 
+                    for service, command in [
+                        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"]),
+                        ("github-mcp", ["node", "dist/index.js"]),
+                        ("google-maps-mcp", ["node", "dist/index.js"]),
+                        ("sequentialthinking-mcp", ["node", "dist/index.js"]),
+                        ("slack-mcp", ["node", "dist/index.js"]),
+                        ("excalidraw-mcp", ["node", "dist/index.js"])
+                    ] if service in tool_name
+                ), None)
+                
+                if discovery:
+                    try:
+                        tool_result = await discovery.call_tool(tool_name, tool_args)
+                        tool_results.append((tool_name, tool_result))
+                    except Exception as e:
+                        tool_results.append((tool_name, f"Error: {e}"))
+                else:
+                    tool_results.append((tool_name, "Tool not found"))
             
-            # Simplified tool finding (assuming MCP SDK provides a consistent tool interface)
-            tool = next((t for t in valid_tools if t.name == tool_name), None)
+            return tool_results
 
-            if tool:
-                try:
-                    # Use the tool's run method directly
-                    tool_result = tool.run(tool_args)
-                    logger.info(f"Tool {tool_name} result: {tool_result}")
+        # Run the async tool processing
+        tool_call_results = asyncio.run(process_tool_calls())
 
-                    tool_call_messages.append(
-                        AIMessage(content=f"✅ `{tool_name}` executed with result:\n```\n{tool_result}\n```")
-                    )
-
-                except Exception as e:
-                    logger.error(f"Error executing tool {tool_name}: {e}")
-                    tool_call_messages.append(
-                        AIMessage(content=f"❌ Error executing `{tool_name}`: {e}")
-                    )
-            else:
-                logger.warning(f"🚨 Tool {tool_name} not found in valid tools")
+        # Convert results to messages
+        for tool_name, result in tool_call_results:
+            tool_call_messages.append(
+                AIMessage(content=f"✅ `{tool_name}` executed with result:\n```\n{result}\n```")
+            )
 
     final_messages = [response] if not tool_call_messages else tool_call_messages
     return {"messages": final_messages}
