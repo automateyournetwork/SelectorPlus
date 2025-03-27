@@ -6,3 +6,5 @@ Could you please check the health for Selector device S3 and send a Slack summar
 Could you please get the health of Selector device S3 and then visualize the health in Excalidraw. Show the diagram ID you made for logging purposes and export the diagram as a SVG?
 Could I please have you check Selector device S3 for health? If there are interface health issues. Use this information you gather about S3 health to then please also draw an Excalidraw diagram showing S3 and its neighbor and their connected interfaces with issues. Please then export this to JSON please
 Can you please check the health of Selector device S3? The Device is in Atlanta can you perform some geolocation lookups and include them in a report on GitHub AutomateYourNetwork repo Packet_Conversations please
+
+can you tell me the health of Selector device S3? Assume its in Atlanta and get the geo locationa and elevation. Also please send a summary to Slack channel C08JG9RART7 and create a comprehensive report in GitHub AutomateYourNetwork repo Packet_Conversations 
