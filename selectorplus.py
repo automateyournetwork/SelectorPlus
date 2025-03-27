@@ -132,7 +132,8 @@ class MCPToolDiscovery:
         except Exception as e:
             print(f"❌ Error discovering tools: {e}")
             return []
-    
+        
+    @traceable
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
         """
         Enhanced tool calling method with comprehensive logging and error handling.
@@ -157,15 +158,64 @@ class MCPToolDiscovery:
             # Initialize normalized_args with the original arguments
             normalized_args = arguments
 
-            # Format arguments based on tool type and tool name
+            # Standardized argument handling: Try to parse __arg1
+            if '__arg1' in arguments:
+                try:
+                    normalized_args = json.loads(arguments['__arg1'])
+                except json.JSONDecodeError:
+                    normalized_args = arguments['__arg1']  # Use the raw string if parsing fails
+
+            # Tool-specific argument formatting (if needed)
             if tool_name == 'ask_selector':
-                # Check if arguments has '__arg1' and format as {'content': ...}
-                if "__arg1" in arguments:
-                    normalized_args = {"content": arguments["__arg1"]}
-            elif tool_name == 'excalidraw-mcp' or tool_name == 'slack-mcp' or tool_name == 'google-maps-mcp' or tool_name == 'github-mcp' or tool_name == 'sequentialthinking-mcp':
-                normalized_args = {
-                    "__arg1": json.dumps(arguments) if len(arguments) > 1 else list(arguments.values())[0]
-                }
+                normalized_args = {"content": normalized_args}
+
+            elif tool_name == 'sequentialthinking':
+                # Format arguments for sequentialthinking
+                if isinstance(normalized_args, dict):
+                    tool_args = normalized_args
+                else:
+                    tool_args = {
+                        "thought": normalized_args,
+                        "nextThoughtNeeded": True,  # Or False if it's the final thought
+                        "thoughtNumber": 1,
+                        "totalThoughts": 6
+                    }
+                # Ensure thoughtNumber is an integer
+                if "thoughtNumber" in tool_args:
+                    tool_args["thoughtNumber"] = int(tool_args["thoughtNumber"])
+                normalized_args = tool_args
+
+            elif tool_name == 'create_or_update_file':
+                # Format arguments for GitHub
+                # Assuming the LLM provides these fields in normalized_args
+                required_fields = ["owner", "repo", "path", "content", "message", "branch"]
+                github_args = {}
+                valid_args = True
+                for field in required_fields:
+                    if field not in normalized_args:
+                        logger.error(f"GitHub tool requires field: {field}")
+                        valid_args = False
+                        break
+                    github_args[field] = normalized_args[field]
+                if valid_args:
+                    normalized_args = github_args
+                    # Decode content from base64
+                    if "content" in normalized_args:
+                        import base64
+                        normalized_args["content"] = base64.b64decode(normalized_args["content"]).decode()
+                    else:
+                        return "Error: Missing required field content"
+                else:
+                    return "Error: Missing required fields for GitHub tool"
+
+            elif tool_name == 'create_drawing' or tool_name == 'get_drawing' or tool_name == 'update_drawing' or tool_name == 'delete_drawing' or tool_name == 'list_drawings' or tool_name == 'export_to_json':
+                # Format arguments for Excalidraw
+                if "content" in normalized_args:
+                    normalized_args["content"] = json.dumps(normalized_args["content"])
+                if tool_name == 'export_to_json':
+                    # Ensure 'id' is passed correctly
+                    if isinstance(normalized_args, str):
+                        normalized_args = {"id": normalized_args}
 
             payload = {
                 "jsonrpc": "2.0",
@@ -206,10 +256,7 @@ class MCPToolDiscovery:
                         error_message = response["error"]
                         if "tool not found" in str(error_message).lower():
                             logger.error(f"🚨 Tool '{tool_name}' not found by service.")
-                            return f"Tool Error: Tool '{tool_name}' not found."
-
-                        logger.error(f"🚨 Tool call error: {error_message}")
-                        return f"Tool Error: {error_message}"
+                            return f"Tool Error: Tool '{error_message}"
                     else:
                         logger.warning("⚠️ Unexpected response structure")
                         return response
@@ -222,7 +269,7 @@ class MCPToolDiscovery:
         except Exception:
             logger.critical(f"🔥 Critical tool call error", exc_info=True)
             return "Critical Error: tool call failure"
-                    
+                                            
 def load_mcp_tools() -> List[Tool]:
     """
     Asynchronously load tools from different MCP services.
@@ -261,15 +308,47 @@ def load_mcp_tools() -> List[Tool]:
     # Run the async function and get tools
     return asyncio.run(gather_tools())
 
-async def get_tools_for_service(service_name, command):
-    """Helper function to discover tools for a specific service."""
-    discovery = MCPToolDiscovery(service_name, command)
-    return await discovery.discover_tools()
+async def get_tools_for_service(service_name, command, discovery_method, call_method, service_discoveries):
+    """Enhanced tool discovery for each service."""
+    print(f"🕵️ Discovering tools for: {service_name}")
+    discovery = MCPToolDiscovery(
+        service_name,
+        command,
+        discovery_method=discovery_method,
+        call_method=call_method
+    )
+    service_discoveries[service_name] = discovery  # Store the instance
+
+    try:
+        discovered_tools = await discovery.discover_tools()
+        print(f"🛠️ Tools for {service_name}: {discovered_tools}")
+
+        # Convert discovered tools to Tool objects
+        tools = []
+        for tool in discovered_tools:
+            tool_name = tool['name']
+            tool_description = tool.get('description', '')
+
+            # Create a Tool that calls call_tool
+            def tool_wrapper(input_arg, tool_name=tool_name):
+                return asyncio.run(service_discoveries[service_name].call_tool(tool_name, {"__arg1": input_arg}))
+
+            tools.append(
+                Tool(
+                    name=tool_name,
+                    description=tool_description,
+                    func=tool_wrapper,
+                )
+            )
+        return tools
+    except Exception as e:
+        print(f"❌ Tool Discovery Error for {service_name}: {e}")
+        return []
 
 async def load_all_tools():
     """Async function to load tools from all services with comprehensive logging."""
     print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
-    
+
     tool_services = [
         ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
         ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
@@ -279,13 +358,7 @@ async def load_all_tools():
         ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
     ]
 
-    print("🔍 Checking Docker Containers:")
-    try:
-        # Run docker ps to verify containers
-        docker_ps_result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
-        print(docker_ps_result.stdout)
-    except Exception as e:
-        print(f"❌ Docker PS Error: {e}")
+    service_discoveries = {}  # Store MCPToolDiscovery instances
 
     async def get_tools_for_service(service_name, command, discovery_method, call_method):
         """Enhanced tool discovery for each service."""
@@ -296,24 +369,39 @@ async def load_all_tools():
             discovery_method=discovery_method,
             call_method=call_method
         )
-        
+        service_discoveries[service_name] = discovery  # Store the instance
+
         try:
             discovered_tools = await discovery.discover_tools()
             print(f"🛠️ Tools for {service_name}: {discovered_tools}")
-            
+
             # Convert discovered tools to Tool objects
-            return [
-                Tool(
-                    name=tool['name'],
-                    description=tool.get('description', ''),
-                    func=lambda x, tool_name=tool['name']: f"Placeholder for {tool_name}"
-                ) for tool in discovered_tools
-            ]
+            tools = []
+            for tool in discovered_tools:
+                tool_name = tool['name']
+                tool_description = tool.get('description', '')
+
+                # Create a Tool that calls call_tool
+                def tool_wrapper(input_arg, tool_name=tool_name):
+                    return asyncio.run(service_discoveries[service_name].call_tool(tool_name, {"__arg1": input_arg}))
+
+                tools.append(
+                    Tool(
+                        name=tool_name,
+                        description=tool_description,
+                        func=tool_wrapper,
+                    )
+                )
+            return tools
         except Exception as e:
             print(f"❌ Tool Discovery Error for {service_name}: {e}")
             return []
 
     try:
+        # Run docker ps to verify containers
+        docker_ps_result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
+        print(docker_ps_result.stdout)
+
         # Gather tools from all services
         all_service_tools = await asyncio.gather(
             *[get_tools_for_service(service, command, discovery_method, call_method)
@@ -321,23 +409,26 @@ async def load_all_tools():
         )
 
         # Flatten the list of tools
-        dynamic_tools = [tool for service_tools in all_service_tools for tool in service_tools]
+        dynamic_tools = [tool for service_tools in all_service_tools for tool in all_service_tools]
 
         # Add local tools
         print("🔍 Loading Local Tools:")
         local_tools = load_local_tools_from_folder("tools")
         print(f"🧰 Local Tools Found: {[tool.name for tool in local_tools]}")
 
-        # Combine all tools
-        all_tools = dynamic_tools + local_tools
+        # Define all_tools before using it
+        all_tools = []
 
-        # Filter out None tools
-        valid_tools = [t for t in all_tools if t is not None]
+        # Combine all tools
+        for tools_list in all_service_tools:
+            if tools_list:
+                all_tools.extend(tools_list)
+        all_tools.extend(local_tools)
 
         print("🔧 Comprehensive Tool Discovery Results:")
-        print("✅ All Discovered Tools:", [t.name for t in valid_tools])
+        print("✅ All Discovered Tools:", [t.name for t in all_tools])
 
-        if not valid_tools:
+        if not all_tools:
             print("🚨 WARNING: NO TOOLS DISCOVERED 🚨")
             print("Potential Issues:")
             print("1. Docker containers not running")
@@ -345,14 +436,14 @@ async def load_all_tools():
             print("3. Network/communication issues")
             print("4. Missing tool configuration")
 
-        return valid_tools
+        return all_tools
 
     except Exception as e:
         print(f"❌ CRITICAL TOOL DISCOVERY ERROR: {e}")
         import traceback
         traceback.print_exc()
         return []
-
+        
 # Use asyncio to run the async function and get tools
 valid_tools = asyncio.run(load_all_tools())
 
@@ -368,98 +459,35 @@ sys_msg = SystemMessage(content="You are an AI assistant with dynamically discov
 
 @traceable
 def assistant(state: MessagesState):
-    """Handles user questions and dynamically invokes tools when needed."""
+    """Handles user questions, detects PCAP files, and dynamically invokes tools when needed."""
+    
     messages = state.get("messages", [])
-    latest_user_message = next((msg for msg in reversed(messages) if isinstance(msg, HumanMessage)), None)
 
+    # ✅ Extract latest user message
+    latest_user_message = next((msg for msg in reversed(messages) if isinstance(msg, HumanMessage)), None)
     if not latest_user_message:
         return {"messages": [AIMessage(content="⚠️ No valid question detected.")]}
 
     logger.info(f"🛠️ Processing Message: {latest_user_message.content}")
-    new_messages = [sys_msg] + messages
+
+    # ✅ Preserve existing messages, including previous PCAP analysis
+    new_messages = [sys_msg] + messages  
+
+    # ✅ Invoke LLM with tools
     response = llm_with_tools.invoke(new_messages)
 
-    tool_call_messages = []
-    if hasattr(response, 'tool_calls') and response.tool_calls:
+    # ✅ Log tool calls before returning response
+    if hasattr(response, "tool_calls") and response.tool_calls:
         logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
 
-        # Create an async function to handle tool calls
-        async def process_tool_calls():
-            tool_results = []
-            for tool_call in response.tool_calls:
-                tool_name = tool_call['name']
-                tool_args = tool_call['args'].copy()
-                logger.info(f"🛠️ Calling tool '{tool_name}' with args: {tool_args}")
-
-                # Dynamically choose the right MCP service
-                service_map = {
-                    'maps_geocode': 'google-maps-mcp',
-                    'slack_post_message': 'slack-mcp',
-                    'github-mcp': 'github-mcp',
-                    'google-maps-mcp': 'google-maps-mcp',
-                    'sequentialthinking-mcp': 'sequentialthinking-mcp',
-                    'slack-mcp': 'slack-mcp',
-                    'excalidraw-mcp': 'excalidraw-mcp'
-                    # Add more mappings as needed
-                }
-
-                container_name = service_map.get(tool_name, 'selector-mcp')
-
-                discovery = MCPToolDiscovery(
-                    container_name,
-                    ["node", "dist/index.js"] if container_name != 'selector-mcp' else ["python3", "mcp_server.py", "--oneshot"]
-                )
-
-                try:
-                    # Determine tool type (Node.js or Python)
-                    tool_types = {
-                        'google-maps-mcp': 'node',
-                        'slack-mcp': 'node',
-                        'github-mcp': 'node',
-                        'sequentialthinking-mcp': 'node',
-                        'excalidraw-mcp': 'node',
-                        'selector-mcp': 'python',
-                        # Add more tool types as needed
-                    }
-                    tool_type = tool_types.get(container_name, 'python')  # Default to python if not found
-
-                    # Format arguments based on tool type
-                    if tool_type == 'node':
-                        normalized_args = {
-                            "__arg1": json.dumps(tool_args) if len(tool_args) > 1 else list(tool_args.values())[0]
-                        }
-                    else:  # Assume Python
-                        normalized_args = tool_args
-
-                    tool_result = await discovery.call_tool(tool_name, normalized_args)
-                    logger.info(f"🛠️ Tool '{tool_name}' result: {tool_result}")
-                    tool_results.append((tool_name, tool_result))
-                except Exception as e:
-                    logger.error(f"❌ Error calling tool '{tool_name}': {e}", exc_info=True)
-                    tool_results.append((tool_name, f"Error: {e}"))
-
-            return tool_results
-
-        # Run the async tool processing
-        tool_call_results = asyncio.run(process_tool_calls())
-
-        # Convert results to messages
-        for tool_name, result in tool_call_results:
-            tool_call_messages.append(
-                AIMessage(content=f"✅ `{tool_name}` executed with result:\n```\n{result}\n```")
-            )
-
-    final_messages = [response] if not tool_call_messages else tool_call_messages
-    return {"messages": final_messages}
-
-logging.info("Script started, LangGraph setup commented out.")
+    return {"messages": response}
 
 # ✅ Build the LangGraph
 builder = StateGraph(MessagesState)
 
 # ✅ Add Nodes
 builder.add_node("assistant", assistant)
-builder.add_node("tools", ToolNode([]))
+builder.add_node("tools", ToolNode(valid_tools))
 
 # ✅ Define Edges (Matches Space Graph)
 builder.add_edge(START, "assistant")
@@ -472,7 +500,7 @@ builder.add_edge("tools", "assistant")  # ✅ Tools always return to assistant
 # ✅ Compile the Graph
 compiled_graph = builder.compile()
 
-logger.info("🚀 Packet Copilot LangGraph compiled successfully")
+logger.info("🚀 Selector Plus LangGraph compiled successfully")
 
 # CLI Loop
 async def run_cli_interaction():
