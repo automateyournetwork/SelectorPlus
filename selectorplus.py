@@ -68,7 +68,7 @@ def schema_to_pydantic_model(name: str, schema: dict):
     Dynamically creates a Pydantic model class from a JSON Schema object.
     Compatible with Pydantic v2.
     """
-    from typing import Any
+    from typing import Any, List, Dict
     namespace = {"__annotations__": {}}
 
     if schema.get("type") != "object":
@@ -89,9 +89,23 @@ def schema_to_pydantic_model(name: str, schema: dict):
         elif json_type == "boolean":
             field_type = bool
         elif json_type == "array":
-            field_type = list
+            items_schema = field_schema.get("items", {})
+            if items_schema.get("type") == "string":
+                field_type = List[str]
+            elif items_schema.get("type") == "integer":
+                field_type = List[int]
+            elif items_schema.get("type") == "number":
+                field_type = List[float]
+            elif items_schema.get("type") == "boolean":
+                field_type = List[bool]
+            elif items_schema.get("type") == "object":
+                # Handle array of objects recursively
+                item_model = schema_to_pydantic_model(name + "_" + field_name + "_Item", items_schema)
+                field_type = List[item_model]
+            else:
+                field_type = List[Any]
         elif json_type == "object":
-            field_type = dict
+            field_type = Dict[str, Any]
         else:
             field_type = Any
 
@@ -491,7 +505,7 @@ async def run_cli_interaction():
         state["messages"].append(user_message)
 
         print("🚀 Invoking graph...")
-        result = await compiled_graph.ainvoke(state)  # ainvoke for async
+        result = await compiled_graph.ainvoke(state, config={"recursion_limit": 100})  # ainvoke for async
         state = result
 
         for message in reversed(state["messages"]):
