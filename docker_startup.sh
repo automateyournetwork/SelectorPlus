@@ -39,6 +39,11 @@ docker build -t excalidraw-mcp ./excalidraw
 if [ $? -ne 0 ]; then echo "Error building excalidraw-mcp image."; exit 1; fi
 echo "excalidraw-mcp image built successfully."
 
+echo "Building brave-search-mcp image..."
+docker build -t brave-search-mcp ./brave-search
+if [ $? -ne 0 ]; then echo "Error building brave-search-mcp image."; exit 1; fi
+echo "brave-search-mcp image built successfully."
+
 # Use environment variables in docker run commands
 echo "Starting github-mcp container..."
 docker run -dit --name github-mcp -e GITHUB_TOKEN="${GITHUB_TOKEN:-YOUR_GITHUB_TOKEN}" github-mcp
@@ -71,5 +76,9 @@ mkdir -p /projects
 echo "Starting filesystem-mcp container..."
 docker run -dit --name filesystem-mcp -v "${FILESYSTEM_PATH:-/projects}:/projects" mcp/filesystem /projects
 echo "filesystem-mcp container started."
+
+echo "Starting brave-search-mcp container..."
+docker run -dit --name brave-search-mcp -e BRAVE_API_KEY="${BRAVE_API_KEY}" brave-search-mcp
+echo "brave-search-mcp container started."
 
 echo "All containers started."

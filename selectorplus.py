@@ -245,6 +245,11 @@ class MCPToolDiscovery:
                 # Correctly format arguments as an empty object
                 normalized_args = {}
 
+            elif tool_name in ['brave_web_search', 'brave_local_search']:
+                #Format arguments for brave web search and brave local search
+                if isinstance(normalized_args, str):
+                    normalized_args = {"query": normalized_args}
+
             payload = {
                 "jsonrpc": "2.0",
                 "method": self.call_method,
@@ -312,7 +317,8 @@ def load_mcp_tools() -> List[Tool]:
             ("sequentialthinking-mcp", ["node", "dist/index.js"]),
             ("slack-mcp", ["node", "dist/index.js"]),
             ("excalidraw-mcp", ["node", "dist/index.js"]),
-            ("filesystem-mcp", ["node", "dist/index.js"])
+            ("filesystem-mcp", ["node", "dist/index.js"]),
+            ("brave-search-mcp", ["node", "dist/index.js"]),
         ]
 
         dynamic_tools = []
@@ -385,7 +391,8 @@ async def load_all_tools():
         ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("filesystem-mcp", ["node", "dist/index.js", "/projects"], "tools/list", "tools/call")
+        ("filesystem-mcp", ["node", "dist/index.js", "/projects"], "tools/list", "tools/call"),
+        ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
     ]
 
     service_discoveries = {}  # Store MCPToolDiscovery instances
