@@ -44,6 +44,12 @@ docker build -t brave-search-mcp ./brave-search
 if [ $? -ne 0 ]; then echo "Error building brave-search-mcp image."; exit 1; fi
 echo "brave-search-mcp image built successfully."
 
+# Build langgraph container
+echo "Building langgraph container..."
+docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorplus
+if [ $? -ne 0 ]; then echo "Error building langgraph-selectorplus image."; exit 1; fi
+echo "langgraph-selectorplus image built successfully."
+
 # Use environment variables in docker run commands
 echo "Starting github-mcp container..."
 docker run -dit --name github-mcp -e GITHUB_TOKEN="${GITHUB_TOKEN:-YOUR_GITHUB_TOKEN}" github-mcp
@@ -80,5 +86,10 @@ echo "filesystem-mcp container started."
 echo "Starting brave-search-mcp container..."
 docker run -dit --name brave-search-mcp -e BRAVE_API_KEY="${BRAVE_API_KEY}" brave-search-mcp
 echo "brave-search-mcp container started."
+
+# Start langgraph container
+echo "Starting langgraph-selectorplus container..."
+docker run -p 2024:2024 -dit --name langgraph-selectorplus langgraph-selectorplus
+echo "langgraph-selectorplus container started."
 
 echo "All containers started."
