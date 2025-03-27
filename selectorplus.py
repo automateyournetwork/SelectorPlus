@@ -11,7 +11,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from langsmith import traceable
 from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from mcp.client.stdio import stdio_client
 from langchain.tools import Tool, StructuredTool
 from typing import Dict, Any, List, Optional, Union
@@ -62,6 +62,46 @@ def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
         description=tool_obj.description,
         func=wrapper,
     )
+
+def schema_to_pydantic_model(name: str, schema: dict):
+    """
+    Dynamically creates a Pydantic model class from a JSON Schema object.
+    Compatible with Pydantic v2.
+    """
+    from typing import Any
+    namespace = {"__annotations__": {}}
+
+    if schema.get("type") != "object":
+        raise ValueError("Only object schemas are supported.")
+
+    properties = schema.get("properties", {})
+    required_fields = set(schema.get("required", []))
+
+    for field_name, field_schema in properties.items():
+        json_type = field_schema.get("type", "string")
+
+        if json_type == "string":
+            field_type = str
+        elif json_type == "integer":
+            field_type = int
+        elif json_type == "number":
+            field_type = float
+        elif json_type == "boolean":
+            field_type = bool
+        elif json_type == "array":
+            field_type = list
+        elif json_type == "object":
+            field_type = dict
+        else:
+            field_type = Any
+
+        namespace["__annotations__"][field_name] = field_type
+        if field_name in required_fields:
+            namespace[field_name] = Field(...)
+        else:
+            namespace[field_name] = Field(default=None)
+
+    return type(name, (BaseModel,), namespace)
 
 logger = logging.getLogger(__name__)
 
@@ -157,98 +197,6 @@ class MCPToolDiscovery:
         try:
             # Initialize normalized_args with the original arguments
             normalized_args = arguments
-
-            # Standardized argument handling: Try to parse __arg1
-            if '__arg1' in arguments:
-                try:
-                    normalized_args = json.loads(arguments['__arg1'])
-                except json.JSONDecodeError:
-                    normalized_args = arguments['__arg1']  # Use the raw string if parsing fails
-
-            # Tool-specific argument formatting (if needed)
-            if tool_name == 'ask_selector':
-                normalized_args = {"content": normalized_args}
-
-            elif tool_name == 'sequentialthinking':
-                # Format arguments for sequentialthinking
-                if isinstance(normalized_args, dict):
-                    tool_args = normalized_args
-                else:
-                    tool_args = {
-                        "thought": normalized_args,
-                        "nextThoughtNeeded": True,  # Or False if it's the final thought
-                        "thoughtNumber": 1,
-                        "totalThoughts": 6
-                    }
-                # Ensure thoughtNumber is an integer
-                if "thoughtNumber" in tool_args:
-                    tool_args["thoughtNumber"] = int(tool_args["thoughtNumber"])
-                normalized_args = tool_args
-
-            elif tool_name == 'create_or_update_file':
-                # Format arguments for GitHub
-                # Assuming the LLM provides these fields in normalized_args
-                required_fields = ["owner", "repo", "path", "content", "message", "branch"]
-                github_args = {}
-                valid_args = True
-                for field in required_fields:
-                    if field not in normalized_args:
-                        logger.error(f"GitHub tool requires field: {field}")
-                        valid_args = False
-                        break
-                    github_args[field] = normalized_args[field]
-                if valid_args:
-                    normalized_args = github_args
-                    # Decode content from base64
-                    if "content" in normalized_args:
-                        import base64
-                        normalized_args["content"] = base64.b64decode(normalized_args["content"]).decode()
-                    else:
-                        return "Error: Missing required field content"
-                else:
-                    return "Error: Missing required fields for GitHub tool"
-
-            elif tool_name == 'create_drawing' or tool_name == 'get_drawing' or tool_name == 'update_drawing' or tool_name == 'delete_drawing' or tool_name == 'list_drawings' or tool_name == 'export_to_json':
-                # Format arguments for Excalidraw
-                if "content" in normalized_args:
-                    normalized_args["content"] = json.dumps(normalized_args["content"])
-                if tool_name == 'export_to_json':
-                    # Ensure 'id' is passed correctly
-                    if isinstance(normalized_args, str):
-                        normalized_args = {"id": normalized_args}
-
-            elif tool_name in ['read_file', 'read_multiple_files', 'write_file', 'edit_file', 'create_directory', 'list_directory', 'move_file', 'search_files', 'get_file_info', 'directory_tree']:
-                # Format arguments for filesystem tools
-                normalized_args = normalized_args if isinstance(normalized_args, dict) else {"path": normalized_args}
-                
-                # Correct paths for filesystem access
-                def ensure_projects_path(path):
-                    """Ensure path starts with '/projects/'"""
-                    if not path:
-                        return path
-                    return path if path.startswith('/projects/') else f'/projects/{path.lstrip("/")}'
-                
-                # Apply path correction to different argument types
-                if 'path' in normalized_args:
-                    normalized_args['path'] = ensure_projects_path(normalized_args['path'])
-                
-                if 'source' in normalized_args:
-                    normalized_args['source'] = ensure_projects_path(normalized_args['source'])
-                
-                if 'destination' in normalized_args:
-                    normalized_args['destination'] = ensure_projects_path(normalized_args['destination'])
-                
-                if 'paths' in normalized_args:
-                    normalized_args['paths'] = [ensure_projects_path(path) for path in normalized_args['paths']]
-            
-            elif tool_name == 'list_allowed_directories':
-                # Correctly format arguments as an empty object
-                normalized_args = {}
-
-            elif tool_name in ['brave_web_search', 'brave_local_search']:
-                #Format arguments for brave web search and brave local search
-                if isinstance(normalized_args, str):
-                    normalized_args = {"query": normalized_args}
 
             payload = {
                 "jsonrpc": "2.0",
@@ -354,31 +302,58 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
     )
     service_discoveries[service_name] = discovery  # Store the instance
 
+    tools = []
+
     try:
         discovered_tools = await discovery.discover_tools()
         print(f"🛠️ Tools for {service_name}: {discovered_tools}")
 
-        # Convert discovered tools to Tool objects
-        tools = []
         for tool in discovered_tools:
             tool_name = tool['name']
             tool_description = tool.get('description', '')
+            tool_schema = tool.get('inputSchema', {}) or tool.get('parameters', {})  # Some servers call it 'parameters'
 
-            # Create a Tool that calls call_tool
-            def tool_wrapper(input_arg, tool_name=tool_name):
-                return asyncio.run(service_discoveries[service_name].call_tool(tool_name, {"__arg1": input_arg}))
+            logger.info(f"🔧 Processing tool '{tool_name}' from service '{service_name}'")
+            logger.debug(f"📝 Raw tool data for '{tool_name}': {json.dumps(tool, indent=2)}")
 
-            tools.append(
-                Tool(
+            if tool_schema and tool_schema.get("type") == "object":
+                logger.info(f"🧬 Found schema for tool '{tool_name}': {json.dumps(tool_schema, indent=2)}")
+
+                try:
+                    input_model = schema_to_pydantic_model(tool_name + "_Input", tool_schema)
+
+                    structured_tool = StructuredTool.from_function(
+                        name=tool_name,
+                        description=tool_description,
+                        args_schema=input_model,
+                        func=lambda **kwargs: asyncio.run(
+                            service_discoveries[service_name].call_tool(tool_name, kwargs)
+                        )
+                    )
+
+                    tools.append(structured_tool)
+                    logger.info(f"✅ Loaded StructuredTool: {tool_name}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to build StructuredTool for '{tool_name}': {e}")
+            else:
+                logger.info(f"📦 No schema found for '{tool_name}'. Falling back to generic Tool with __arg1")
+
+                fallback_tool = Tool(
                     name=tool_name,
                     description=tool_description,
-                    func=tool_wrapper,
+                    func=lambda x: asyncio.run(
+                        service_discoveries[service_name].call_tool(tool_name, {"__arg1": x})
+                    )
                 )
-            )
-        return tools
+
+                tools.append(fallback_tool)
+                logger.info(f"✅ Loaded fallback Tool: {tool_name}")
+
     except Exception as e:
-        print(f"❌ Tool Discovery Error for {service_name}: {e}")
-        return []
+        logger.error(f"❌ Tool Discovery Error for {service_name}: {e}")
+    finally:
+        logger.info(f"🏁 Finished processing tools for service: {service_name}")
+        return tools
 
 async def load_all_tools():
     """Async function to load tools from all services with comprehensive logging."""
@@ -392,58 +367,22 @@ async def load_all_tools():
         ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("filesystem-mcp", ["node", "dist/index.js", "/projects"], "tools/list", "tools/call"),
-        ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
+         ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
     ]
-
-    service_discoveries = {}  # Store MCPToolDiscovery instances
-
-    async def get_tools_for_service(service_name, command, discovery_method, call_method):
-        """Enhanced tool discovery for each service."""
-        print(f"🕵️ Discovering tools for: {service_name}")
-        discovery = MCPToolDiscovery(
-            service_name,
-            command,
-            discovery_method=discovery_method,
-            call_method=call_method
-        )
-        service_discoveries[service_name] = discovery  # Store the instance
-
-        try:
-            discovered_tools = await discovery.discover_tools()
-            print(f"🛠️ Tools for {service_name}: {discovered_tools}")
-
-            # Convert discovered tools to Tool objects
-            tools = []
-            for tool in discovered_tools:
-                tool_name = tool['name']
-                tool_description = tool.get('description', '')
-
-                # Create a Tool that calls call_tool
-                def tool_wrapper(input_arg, tool_name=tool_name):
-                    return asyncio.run(service_discoveries[service_name].call_tool(tool_name, {"__arg1": input_arg}))
-
-                tools.append(
-                    Tool(
-                        name=tool_name,
-                        description=tool_description,
-                        func=tool_wrapper,
-                    )
-                )
-            return tools
-        except Exception as e:
-            print(f"❌ Tool Discovery Error for {service_name}: {e}")
-            return []
 
     try:
         # Run docker ps to verify containers
         docker_ps_result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
         print(docker_ps_result.stdout)
 
+        service_discoveries = {}
+
         # Gather tools from all services
+        # 🛠️ Pass service_discoveries in the call
         all_service_tools = await asyncio.gather(
-            *[get_tools_for_service(service, command, discovery_method, call_method)
+            *[get_tools_for_service(service, command, discovery_method, call_method, service_discoveries)
               for service, command, discovery_method, call_method in tool_services]
-        )
+            )
 
         # Flatten the list of tools
         dynamic_tools = [tool for service_tools in all_service_tools for tool in all_service_tools]
@@ -487,9 +426,9 @@ valid_tools = asyncio.run(load_all_tools())
 print("🔧 All bound tools:", [t.name for t in valid_tools])
 
 # LLM
-llm = ChatOpenAI(model="gpt-4o")
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.1)
 
-llm_with_tools = llm.bind_tools(valid_tools, parallel_tool_calls=False)
+llm_with_tools = llm.bind_tools(valid_tools)
 
 # System Message
 sys_msg = SystemMessage(content="You are an AI assistant with dynamically discovered tools.")
