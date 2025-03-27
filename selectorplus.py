@@ -217,6 +217,34 @@ class MCPToolDiscovery:
                     if isinstance(normalized_args, str):
                         normalized_args = {"id": normalized_args}
 
+            elif tool_name in ['read_file', 'read_multiple_files', 'write_file', 'edit_file', 'create_directory', 'list_directory', 'move_file', 'search_files', 'get_file_info', 'directory_tree']:
+                # Format arguments for filesystem tools
+                normalized_args = normalized_args if isinstance(normalized_args, dict) else {"path": normalized_args}
+                
+                # Correct paths for filesystem access
+                def ensure_projects_path(path):
+                    """Ensure path starts with '/projects/'"""
+                    if not path:
+                        return path
+                    return path if path.startswith('/projects/') else f'/projects/{path.lstrip("/")}'
+                
+                # Apply path correction to different argument types
+                if 'path' in normalized_args:
+                    normalized_args['path'] = ensure_projects_path(normalized_args['path'])
+                
+                if 'source' in normalized_args:
+                    normalized_args['source'] = ensure_projects_path(normalized_args['source'])
+                
+                if 'destination' in normalized_args:
+                    normalized_args['destination'] = ensure_projects_path(normalized_args['destination'])
+                
+                if 'paths' in normalized_args:
+                    normalized_args['paths'] = [ensure_projects_path(path) for path in normalized_args['paths']]
+            
+            elif tool_name == 'list_allowed_directories':
+                # Correctly format arguments as an empty object
+                normalized_args = {}
+
             payload = {
                 "jsonrpc": "2.0",
                 "method": self.call_method,
@@ -231,7 +259,7 @@ class MCPToolDiscovery:
                 input=json.dumps(payload) + "\n",
                 capture_output=True,
                 text=True,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},  # Ensure unbuffered output
+                env={**os.environ, "PYTHONUNBUFFERED": "1"}
             )
 
             logger.info(f"🔬 Subprocess Exit Code: {process.returncode}")
@@ -283,7 +311,8 @@ def load_mcp_tools() -> List[Tool]:
             ("google-maps-mcp", ["node", "dist/index.js"]),
             ("sequentialthinking-mcp", ["node", "dist/index.js"]),
             ("slack-mcp", ["node", "dist/index.js"]),
-            ("excalidraw-mcp", ["node", "dist/index.js"])
+            ("excalidraw-mcp", ["node", "dist/index.js"]),
+            ("filesystem-mcp", ["node", "dist/index.js"])
         ]
 
         dynamic_tools = []
@@ -355,7 +384,8 @@ async def load_all_tools():
         ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
+        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("filesystem-mcp", ["node", "dist/index.js", "/projects"], "tools/list", "tools/call")
     ]
 
     service_discoveries = {}  # Store MCPToolDiscovery instances

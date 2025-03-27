@@ -64,4 +64,12 @@ echo "Starting excalidraw-mcp container..."
 docker run -dit --name excalidraw-mcp excalidraw-mcp
 echo "excalidraw-mcp container started."
 
+# Ensure the /projects directory exists on the host
+mkdir -p /projects
+
+# Filesystem MCP Server
+echo "Starting filesystem-mcp container..."
+docker run -dit --name filesystem-mcp -v "${FILESYSTEM_PATH:-/projects}:/projects" mcp/filesystem /projects
+echo "filesystem-mcp container started."
+
 echo "All containers started."
