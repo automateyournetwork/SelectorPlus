@@ -87,9 +87,22 @@ echo "Starting brave-search-mcp container..."
 docker run -dit --name brave-search-mcp -e BRAVE_API_KEY="${BRAVE_API_KEY}" brave-search-mcp
 echo "brave-search-mcp container started."
 
+# Wait for MCP containers to start (with a check)
+echo "Waiting for MCP containers to start..."
+sleep 5 # Initial wait
+
+# Check if MCP containers are running
+if ! docker ps | grep -q "github-mcp"; then
+    echo "github-mcp container not found."
+    exit 1
+fi
+
 # Start langgraph container
 echo "Starting langgraph-selectorplus container..."
-docker run -p 2024:2024 -dit --name langgraph-selectorplus langgraph-selectorplus
+docker run -p 2024:2024 -dit \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --name langgraph-selectorplus \
+    langgraph-selectorplus
 echo "langgraph-selectorplus container started."
 
 echo "All containers started."
