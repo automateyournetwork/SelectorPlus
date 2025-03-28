@@ -31,4 +31,4 @@ USER node
 # Install dependencies as non-root user
 RUN npm ci --ignore-scripts --omit-dev
 
-ENTRYPOINT ["node", "/app/dist/index.js", "/projects"]
+CMD ["node", "/app/dist/index.js", "/projects"]

@@ -97,11 +97,10 @@ echo "Starting excalidraw-mcp container..."
 docker run -dit --name excalidraw-mcp excalidraw-mcp
 echo "excalidraw-mcp container started."
 
-
-# Filesystem MCP Server
-echo "Starting filesystem-mcp container..."
-docker run -dit --name filesystem-mcp -v "${FILESYSTEM_PATH:-/projects}:/projects" filesystem-mcp
-echo "filesystem-mcp container started."
+docker run -dit \
+  --name filesystem-mcp \
+  -v "/Users/johncapobianco/SelectorPlusOutput:/projects" \
+  filesystem-mcp
 
 echo "Starting brave-search-mcp container..."
 docker run -dit --name brave-search-mcp -e BRAVE_API_KEY="${BRAVE_API_KEY}" brave-search-mcp
