@@ -49,6 +49,12 @@ docker build -t brave-search-mcp ./brave-search
 if [ $? -ne 0 ]; then echo "Error building brave-search-mcp image."; exit 1; fi
 echo "brave-search-mcp image built successfully."
 
+#Filesystem
+echo "Building filesystem-mcp image..."
+docker build -t filesystem-mcp ./filesystem
+if [ $? -ne 0 ]; then echo "Error building filesystem-mcp image."; exit 1; fi
+echo "filesystem-mcp image built successfully."
+
 # Build langgraph container
 echo "Building langgraph container..."
 docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorplus
@@ -91,9 +97,10 @@ echo "Starting excalidraw-mcp container..."
 docker run -dit --name excalidraw-mcp excalidraw-mcp
 echo "excalidraw-mcp container started."
 
+
 # Filesystem MCP Server
 echo "Starting filesystem-mcp container..."
-docker run -dit --name filesystem-mcp -v "${FILESYSTEM_PATH:-/projects}:/projects" mcp/filesystem /projects
+docker run -dit --name filesystem-mcp -v "${FILESYSTEM_PATH:-/projects}:/projects" filesystem-mcp
 echo "filesystem-mcp container started."
 
 echo "Starting brave-search-mcp container..."
