@@ -8,7 +8,12 @@ else
   echo ".env file not found. Using default values."
 fi
 
-# Build containers
+####################
+#                  #
+# Build containers #
+#                  #
+####################
+
 echo "Building github-mcp image..."
 docker build -t github-mcp ./github
 if [ $? -ne 0 ]; then echo "Error building github-mcp image."; exit 1; fi
@@ -50,6 +55,17 @@ docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorpl
 if [ $? -ne 0 ]; then echo "Error building langgraph-selectorplus image."; exit 1; fi
 echo "langgraph-selectorplus image built successfully."
 
+echo "Building streamlit-app image..."
+docker build -t streamlit-app ./streamlit
+if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
+echo "streamlit-app image built successfully."
+
+#######
+#     #
+# RUN #
+#     #
+#######
+
 # Use environment variables in docker run commands
 echo "Starting github-mcp container..."
 docker run -dit --name github-mcp -e GITHUB_TOKEN="${GITHUB_TOKEN:-YOUR_GITHUB_TOKEN}" github-mcp
@@ -74,9 +90,6 @@ echo "selector-mcp container started."
 echo "Starting excalidraw-mcp container..."
 docker run -dit --name excalidraw-mcp excalidraw-mcp
 echo "excalidraw-mcp container started."
-
-# Ensure the /projects directory exists on the host
-mkdir -p /projects
 
 # Filesystem MCP Server
 echo "Starting filesystem-mcp container..."
@@ -104,5 +117,10 @@ docker run -p 2024:2024 -dit \
     --name langgraph-selectorplus \
     langgraph-selectorplus
 echo "langgraph-selectorplus container started."
+
+# Start Streamlit front end
+echo "Starting streamlit-app container..."
+docker run -d --name streamlit-app -p 8501:8501 streamlit-app
+echo "streamlit-app container started at http://localhost:8501"
 
 echo "All containers started."
