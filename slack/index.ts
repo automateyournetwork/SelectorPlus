@@ -529,14 +529,14 @@ async function main() {
     console.error("Received ListToolsRequest");
     return {
       tools: [
-        listChannelsTool,
+        // listChannelsTool,
         postMessageTool,
-        replyToThreadTool,
-        addReactionTool,
-        getChannelHistoryTool,
-        getThreadRepliesTool,
-        getUsersTool,
-        getUserProfileTool,
+        // replyToThreadTool,
+        // addReactionTool,
+        // getChannelHistoryTool,
+        // getThreadRepliesTool,
+        // getUsersTool,
+        // getUserProfileTool,
       ],
     };
   });

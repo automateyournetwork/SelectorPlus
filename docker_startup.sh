@@ -8,7 +8,12 @@ else
   echo ".env file not found. Using default values."
 fi
 
-# Build containers
+####################
+#                  #
+# Build containers #
+#                  #
+####################
+
 echo "Building github-mcp image..."
 docker build -t github-mcp ./github
 if [ $? -ne 0 ]; then echo "Error building github-mcp image."; exit 1; fi
@@ -44,6 +49,23 @@ docker build -t brave-search-mcp ./brave-search
 if [ $? -ne 0 ]; then echo "Error building brave-search-mcp image."; exit 1; fi
 echo "brave-search-mcp image built successfully."
 
+# Build langgraph container
+echo "Building langgraph container..."
+docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorplus
+if [ $? -ne 0 ]; then echo "Error building langgraph-selectorplus image."; exit 1; fi
+echo "langgraph-selectorplus image built successfully."
+
+echo "Building streamlit-app image..."
+docker build -t streamlit-app ./streamlit
+if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
+echo "streamlit-app image built successfully."
+
+#######
+#     #
+# RUN #
+#     #
+#######
+
 # Use environment variables in docker run commands
 echo "Starting github-mcp container..."
 docker run -dit --name github-mcp -e GITHUB_TOKEN="${GITHUB_TOKEN:-YOUR_GITHUB_TOKEN}" github-mcp
@@ -69,9 +91,6 @@ echo "Starting excalidraw-mcp container..."
 docker run -dit --name excalidraw-mcp excalidraw-mcp
 echo "excalidraw-mcp container started."
 
-# Ensure the /projects directory exists on the host
-mkdir -p /projects
-
 # Filesystem MCP Server
 echo "Starting filesystem-mcp container..."
 docker run -dit --name filesystem-mcp -v "${FILESYSTEM_PATH:-/projects}:/projects" mcp/filesystem /projects
@@ -80,5 +99,28 @@ echo "filesystem-mcp container started."
 echo "Starting brave-search-mcp container..."
 docker run -dit --name brave-search-mcp -e BRAVE_API_KEY="${BRAVE_API_KEY}" brave-search-mcp
 echo "brave-search-mcp container started."
+
+# Wait for MCP containers to start (with a check)
+echo "Waiting for MCP containers to start..."
+sleep 5 # Initial wait
+
+# Check if MCP containers are running
+if ! docker ps | grep -q "github-mcp"; then
+    echo "github-mcp container not found."
+    exit 1
+fi
+
+# Start langgraph container
+echo "Starting langgraph-selectorplus container..."
+docker run -p 2024:2024 -dit \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --name langgraph-selectorplus \
+    langgraph-selectorplus
+echo "langgraph-selectorplus container started."
+
+# Start Streamlit front end
+echo "Starting streamlit-app container..."
+docker run -d --name streamlit-app -p 8501:8501 streamlit-app
+echo "streamlit-app container started at http://localhost:8501"
 
 echo "All containers started."
