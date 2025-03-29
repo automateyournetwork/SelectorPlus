@@ -156,35 +156,49 @@ class MCPClient:
     @traceable
     async def connect(self):
         """Connects to the MCP server via stdio and initializes the session."""
-        # Create docker command as a list
-        docker_command = ["docker", "exec", "-i", self.name] + self.command
-        
-        # Create StdioServerParameters with a string command for just the inner part
-        # This is what the original code was trying to do
-        inner_command_str = " ".join(self.command)
-        server_params = StdioServerParameters(command=inner_command_str)
-        
-        # Pass both to stdio_client, assuming it can take both
-        self._streams_context = stdio_client(docker_command, server_params)
-        
+        self.log.info(f"Connecting to MCP server: {self.name}")
+
+        # Create StdioServerParameters
+        server_params = StdioServerParameters(
+            command="docker",
+            args=["exec", "-i", self.name] + self.command,
+        )
+        self.log.info(f"StdioServerParameters: {server_params}")
+
+        # Pass server_params to stdio_client
+        self.log.info("Passing server_params to stdio_client")
+        self._streams_context = stdio_client(server_params)
+
+        self.log.info("Entering streams context")
         streams = await self._streams_context.__aenter__()
+        self.log.info("Streams context entered")
+
+        self.log.info("Creating ClientSession")
         self._session_context = ClientSession(*streams)
         self.session: ClientSession = await self._session_context.__aenter__()
+        self.log.info("ClientSession created")
+
+        self.log.info("Initializing session")
         await self.session.initialize()
+        self.log.info("Session initialized")
+
+        self.log.info("Listing tools")
         response = await self.session.list_tools()
+        self.log.info(f"Tools response: {response}")
+
         self.tools = [self.mcp_tool_wrapper(tool) for tool in response.tools]
         self.tool_by_name = {tool.name: tool for tool in self.tools}
         self.log.info(
             f"MCP client/{self.name}: Connected to server with tools: {', '.join(self.tool_by_name)}",
         )
-    
+
     async def close(self):
         """Properly clean up the session and streams."""
         if self._session_context:
             await self._session_context.__aexit__(None, None, None)
 
         if self._streams_context:
-            await self._streams_context.__aexit__(None, None, None)
+            await self._streams_context.__aexit__(None, None, None)    
 
     @traceable
     def mcp_tool_wrapper(self, mcp_tool: Tool) -> StructuredTool:
@@ -209,7 +223,7 @@ class MCPClient:
 async def load_all_tools():
     print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
     mcp_servers = [
-        ("selector-mcp", ["selector-mcp", "python3", "mcp_server.py", "--oneshot"]),
+        ("selector-mcp", ["selector-mcp", "python3", "mcp_server.py"]),
         ("github-mcp", ["github-mcp", "node", "dist/index.js"]),
         ("google-maps-mcp", ["google-maps-mcp", "node", "dist/index.js"]),
         ("sequentialthinking-mcp", ["sequentialthinking-mcp", "node", "dist/index.js"]),
