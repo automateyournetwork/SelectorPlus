@@ -286,14 +286,14 @@ def load_mcp_tools() -> List[Tool]:
 
     async def gather_tools():
         tool_services = [
-            ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
+            #("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
             ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
-            ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
-            ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
+            #("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+            #("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+            #("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+            #("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+            #("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
+            #("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
         ]
 
         dynamic_tools = []
@@ -399,14 +399,14 @@ async def load_all_tools():
     print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
 
     tool_services = [
-        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
+        #("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
         ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
-        ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
-        ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
+        #("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        #("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        #("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        #("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        #("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
+        #("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
     ]
 
     try:
