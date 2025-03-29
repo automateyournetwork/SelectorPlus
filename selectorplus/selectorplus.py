@@ -26,7 +26,6 @@ from langgraph.prebuilt.tool_node import tools_condition, ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
-
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -154,30 +153,31 @@ class MCPClient:
         self._streams_context = None
         self._session_context = None
 
+    @traceable
     async def connect(self):
         """Connects to the MCP server via stdio and initializes the session."""
-
-        # Construct the full command to execute within the container
-        full_command = ["docker", "exec", "-i"] + self.command
-
-        self._streams_context = stdio_client(
-            command=full_command,
-        )
+        # Create docker command as a list
+        docker_command = ["docker", "exec", "-i", self.name] + self.command
+        
+        # Create StdioServerParameters with a string command for just the inner part
+        # This is what the original code was trying to do
+        inner_command_str = " ".join(self.command)
+        server_params = StdioServerParameters(command=inner_command_str)
+        
+        # Pass both to stdio_client, assuming it can take both
+        self._streams_context = stdio_client(docker_command, server_params)
+        
         streams = await self._streams_context.__aenter__()
-
         self._session_context = ClientSession(*streams)
         self.session: ClientSession = await self._session_context.__aenter__()
-
         await self.session.initialize()
         response = await self.session.list_tools()
-
         self.tools = [self.mcp_tool_wrapper(tool) for tool in response.tools]
         self.tool_by_name = {tool.name: tool for tool in self.tools}
-
         self.log.info(
             f"MCP client/{self.name}: Connected to server with tools: {', '.join(self.tool_by_name)}",
         )
-
+    
     async def close(self):
         """Properly clean up the session and streams."""
         if self._session_context:
@@ -186,6 +186,7 @@ class MCPClient:
         if self._streams_context:
             await self._streams_context.__aexit__(None, None, None)
 
+    @traceable
     def mcp_tool_wrapper(self, mcp_tool: Tool) -> StructuredTool:
         """Wraps MCP tool functions into LangChain Tool objects."""
 
@@ -204,6 +205,7 @@ class MCPClient:
         )
 
 # Modified load_all_tools function
+@traceable
 async def load_all_tools():
     print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
     mcp_servers = [
@@ -238,7 +240,7 @@ async def load_all_tools():
 # Use asyncio to run the async function and get tools
 valid_tools = asyncio.run(load_all_tools())
 
-embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")  # or "text-embedding-005"
+embedding = GoogleGenerativeAIEmbeddings(model="models/text-embedding-005")  # or "text-embedding-005"
 vector_store = InMemoryVectorStore(embedding=embedding)
 
 tool_documents = [
@@ -781,7 +783,40 @@ def select_tools(state: MessagesStateWithSelection):
             "selected_tools": selected_tool_names
         }
 
+@traceable
+async def handle_tool_response(state: MessagesStateWithSelection):
+    messages = state.get("messages", [])
+    last_message = messages[-1]
+    if isinstance(last_message, ToolMessage):
+        tool_name = last_message.name
+        tool_args = last_message.content
+        logger.info(f"Handling tool response for: {tool_name} with args: {tool_args}")
+        try:
+            # *** THIS IS WHERE YOU CALL YOUR ACTUAL TOOL ***
+            # 1. Find the tool object from valid_tools:
+            tool_to_call = next((tool for tool in valid_tools if tool.name == tool_name), None)
+            if tool_to_call:
+                # 2. Execute the tool's function:
+                #    Important: Ensure you pass the arguments correctly!
+                if isinstance(tool_to_call, StructuredTool):
+                    tool_args_dict = json.loads(tool_args)
+                    tool_result = await tool_to_call.func(**tool_args_dict)
+                elif isinstance(tool_to_call, Tool):
+                    tool_result = await tool_to_call.func(tool_args)
+                else:
+                    tool_result = f"Error: Tool '{tool_name}' not found."
+            else:
+                tool_result = f"Error: Tool '{tool_name}' not found."
 
+            logger.info(f"Tool execution result: {tool_result}")
+            ai_message = AIMessage(content=str(tool_result))  # Format as AIMessage
+            return {"messages": messages + [ai_message]}  # Add to conversation
+        except Exception as e:
+            logger.error(f"Error executing tool: {e}", exc_info=True)
+            return {"messages": messages + [AIMessage(content=f"Error: {e}")], "error": True}
+    else:
+        return {"messages": messages}
+    
 @traceable
 def assistant(state: MessagesStateWithSelection):
     messages = state.get("messages", [])
@@ -839,10 +874,15 @@ class State(TypedDict):
     messages: Annotated[list, add_messages]
     selected_tools: list[str]
 
+class State(TypedDict):
+    messages: Annotated[list, add_messages]
+    selected_tools: list[str]
+
 graph_builder = StateGraph(State)
 
 graph_builder.add_node("assistant", assistant)
 graph_builder.add_node("select_tools", select_tools)
+graph_builder.add_node("handle_tool_response", handle_tool_response)  # Add the new node
 
 # ToolNode for calling actual tools
 tool_node = ToolNode(tools=valid_tools)
@@ -852,16 +892,18 @@ graph_builder.add_node("tools", tool_node)
 graph_builder.add_conditional_edges(
     "assistant",
     tools_condition,
-    path_map={"tools": "tools", END: END}
+    path_map={"tools": "tools", "handle_tool_response": "handle_tool_response", END: END}
 )
 
 graph_builder.add_edge("select_tools", "assistant")
+graph_builder.add_edge("assistant", "tools")  # Route to tools node
+graph_builder.add_edge("tools", "handle_tool_response")  # Route to handle_tool_response
+graph_builder.add_edge("handle_tool_response", "assistant")  # Route back to assistant
 graph_builder.add_edge(START, "select_tools")
 
 compiled_graph = graph_builder.compile()
 
 logger.info("🚀 Selector Plus LangGraph compiled successfully")
-
 
 # CLI Loop
 async def run_cli_interaction():
