@@ -20,7 +20,9 @@ RUN echo "==? Install langgraph and required components" \
   && pip install --break-system-packages --upgrade "langgraph-cli[inmem]" \
   && pip install --break-system-packages langsmith \
   && pip install --break-system-packages fastapi \
-  && pip install --break-system-packages mcp 
+  && pip install --break-system-packages mcp \
+  && pip install --break-system-packages google-generativeai
+
 
 RUN apt-get update && apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
