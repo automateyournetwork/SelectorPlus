@@ -10,7 +10,6 @@ import subprocess
 from functools import wraps
 from dotenv import load_dotenv
 from langsmith import traceable
-import google.generativeai as genai
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 from mcp.client.stdio import stdio_client
@@ -20,20 +19,26 @@ from langchain_core.messages import BaseMessage
 from langchain.tools import Tool, StructuredTool
 from langgraph.graph.message import add_messages
 from langchain_core.vectorstores import InMemoryVectorStore
-from mcp import ClientSession, StdioServerParameters, types
+from mcp import ClientSession, StdioServerParameters, types, Tool
 from typing import Dict, Any, List, Optional, Union, Annotated
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.prebuilt.tool_node import tools_condition, ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-MessagesStateWithSelection = Dict[str, Union[List[BaseMessage], List[str]]]
+class MessagesStateWithSelection(dict):
+    messages: List[Union[HumanMessage, AIMessage, ToolMessage]]
+    selected_tools: List[str]
 
+    def __init__(self, messages: List[Union[HumanMessage, AIMessage, ToolMessage]] = [],
+                 selected_tools: List[str] = []):
+        super().__init__(messages=messages, selected_tools=selected_tools)
 
 def load_local_tools_from_folder(folder_path: str) -> List[Tool]:
     local_tools = []
@@ -55,7 +60,6 @@ def load_local_tools_from_folder(folder_path: str) -> List[Tool]:
                 print(f"❌ Failed to import {module_name}: {e}")
     return local_tools
 
-
 def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
     original_func = tool_obj.func
 
@@ -73,7 +77,6 @@ def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
         description=tool_obj.description,
         func=wrapper,
     )
-
 
 def schema_to_pydantic_model(name: str, schema: dict):
     """
@@ -129,348 +132,108 @@ def schema_to_pydantic_model(name: str, schema: dict):
 
     return type(name, (BaseModel,), namespace)
 
-
 logger = logging.getLogger(__name__)
 
+class MCPClient:
+    """MCPClient adapted for stdio connections."""
 
-class MessagesStateWithSelection(dict):
-    messages: List[Union[HumanMessage, AIMessage, ToolMessage]]
-    selected_tools: List[str]
+    def __init__(self, name: str, command: list[str]):
+        """
+        Initializes the MCPClient with the given parameters.
 
-    def __init__(self, messages: List[Union[HumanMessage, AIMessage, ToolMessage]] = [],
-                 selected_tools: List[str] = []):
-        super().__init__(messages=messages, selected_tools=selected_tools)
-
-
-class MCPToolDiscovery:
-    def __init__(self, container_name: str, command: List[str], discovery_method: str = "tools/discover",
-                 call_method: str = "tools/call"):
-        self.container_name = container_name
+        Args:
+            name: A name for the client.
+            command: The command to execute within the container.
+        """
+        self.name = name
+        self.session: Optional[ClientSession] = None
         self.command = command
-        self.discovery_method = discovery_method
-        self.call_method = call_method
-        self.discovered_tools = []
+        self.tools: list[Tool] = None
+        self.tool_by_name: dict[str, StructuredTool] = None
+        self.log = logger
+        self._streams_context = None
+        self._session_context = None
 
-    async def discover_tools(self) -> List[Dict[str, Any]]:
-        print(f"🔍 Discovering tools from container: {self.container_name}")
-        print(f"🕵️ Discovery Method: {self.discovery_method}")
+    async def connect(self):
+        """Connects to the MCP server via stdio and initializes the session."""
 
-        try:
-            discovery_payload = {
-                "jsonrpc": "2.0",
-                "method": self.discovery_method,
-                "params": {},
-                "id": "1"
-            }
-            print(f"Sending discovery payload: {discovery_payload}")  # added log
-            command = ["docker", "exec", "-i", self.container_name] + self.command
-            process = subprocess.run(
-                command,
-                input=json.dumps(discovery_payload) + "\n",
-                capture_output=True,
-                text=True,
-            )
-            stdout_lines = process.stdout.strip().split("\n")
-            print("📥 Raw discovery response:", stdout_lines)
-            if stdout_lines:
-                last_line = None
-                for line in reversed(stdout_lines):
-                    if line.startswith("{") or line.startswith("["):
-                        last_line = line
-                        break
-                if last_line:
-                    try:
-                        response = json.loads(last_line)
-                        # Correctly handle both response structures
-                        if "result" in response:
-                            if isinstance(response["result"], list):
-                                tools = response["result"]
-                            elif isinstance(response["result"], dict) and "tools" in response["result"]:
-                                tools = response["result"]["tools"]
-                            else:
-                                print("❌ Unexpected 'result' structure.")
-                                return []
-                        else:
-                            tools = []  # Assuming no tools if result is not present
-                        if tools:
-                            print("✅ Discovered tools:", [tool["name"] for tool in tools])
-                            return tools
-                        else:
-                            print("❌ No tools found in response.")
-                            return []
-                    except json.JSONDecodeError as e:
-                        print(f"❌ JSON Decode Error: {e}")
-                        return []
-                    else:
-                        print("❌ No valid JSON response found.")
-                        return []
-                else:
-                    print("❌ No response lines received.")
-                    return []
-        except Exception as e:
-            print(f"❌ Error discovering tools: {e}")
-            return []
+        # Construct the full command to execute within the container
+        full_command = ["docker", "exec", "-i"] + self.command
 
-    @traceable
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
-        """
-        Enhanced tool calling method with comprehensive logging and error handling.
-        """
-        logger.info(f"🔍 Attempting to call tool: {tool_name}")
-        logger.info(f"📦 Arguments: {arguments}")
+        self._streams_context = stdio_client(
+            command=full_command,
+        )
+        streams = await self._streams_context.__aenter__()
 
-        # Detailed logging of containers and network
-        try:
-            network_inspect = subprocess.run(
-                ["docker", "network", "inspect", "bridge"],
-                capture_output=True,
-                text=True,
-            )
-            logger.info(f"🌐 Network Details: {network_inspect.stdout}")
-        except Exception as e:
-            logger.error(f"❌ Network inspection failed: {e}")
+        self._session_context = ClientSession(*streams)
+        self.session: ClientSession = await self._session_context.__aenter__()
 
-        command = ["docker", "exec", "-i", self.container_name] + self.command
+        await self.session.initialize()
+        response = await self.session.list_tools()
 
-        try:
-            # Initialize normalized_args with the original arguments
-            normalized_args = arguments
+        self.tools = [self.mcp_tool_wrapper(tool) for tool in response.tools]
+        self.tool_by_name = {tool.name: tool for tool in self.tools}
 
-            payload = {
-                "jsonrpc": "2.0",
-                "method": self.call_method,
-                "params": {"name": tool_name, "arguments": normalized_args},
-                "id": "2",
-            }
-
-            logger.info(f"🚀 Full Payload: {json.dumps(payload)}")
-
-            process = subprocess.run(
-                command,
-                input=json.dumps(payload) + "\n",
-                capture_output=True,
-                text=True,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"}
-            )
-
-            logger.info(f"🔬 Subprocess Exit Code: {process.returncode}")
-            logger.info(f"🔬 Full subprocess stdout: {process.stdout}")
-            logger.info(f"🔬 Full subprocess stderr: {process.stderr}")
-
-            if process.returncode != 0:
-                logger.error(f"❌ Subprocess returned non-zero exit code: {process.returncode}")
-                logger.error(f"🚨 Error Details: {process.stderr}")
-                return f"Subprocess Error: {process.stderr}"
-
-            # Enhanced JSON parsing with fallback and explicit tool name checking
-            output_lines = process.stdout.strip().split("\n")
-            for line in reversed(output_lines):
-                try:
-                    response = json.loads(line)
-                    logger.info(f"✅ Parsed JSON response: {response}")
-
-                    if "result" in response:
-                        return response["result"]
-                    elif "error" in response:
-                        error_message = response["error"]
-                        if "tool not found" in str(error_message).lower():
-                            logger.error(f"🚨 Tool '{tool_name}' not found by service.")
-                            return f"Tool Error: Tool '{error_message}"
-                    else:
-                        logger.warning("⚠️ Unexpected response structure")
-                        return response
-                except json.JSONDecodeError:
-                    continue
-
-            logger.error("❌ No valid JSON response found")
-            return "Error: No valid JSON response"
-
-        except Exception:
-            logger.critical(f"🔥 Critical tool call error", exc_info=True)
-            return "Critical Error: tool call failure"
-
-
-def load_mcp_tools() -> List[Tool]:
-    """
-    Asynchronously load tools from different MCP services.
-
-    :return: Consolidated list of tools
-    """
-
-    async def gather_tools():
-        tool_services = [
-            ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
-            ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
-            ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-            ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
-            ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
-        ]
-
-        dynamic_tools = []
-        for service, command in tool_services:
-            discovery = MCPToolDiscovery(service, command)
-            tools = await discovery.discover_tools()
-            dynamic_tools.extend(tools)
-
-        # Load local tools
-        local_tools = load_local_tools_from_folder("tools")
-
-        # Combine MCP and local tools
-        all_tools = dynamic_tools + local_tools
-
-        # Filter out None tools
-        valid_tools = [t for t in all_tools if t is not None]
-
-        print("🔧 All bound tools:", [t.name for t in valid_tools])
-
-        return valid_tools
-
-    # Run the async function and get tools
-    return asyncio.run(gather_tools())
-
-
-async def get_tools_for_service(service_name, command, discovery_method, call_method, service_discoveries):
-    """Enhanced tool discovery for each service."""
-    print(f"🕵️ Discovering tools for: {service_name}")
-    discovery = MCPToolDiscovery(
-        service_name,
-        command,
-        discovery_method=discovery_method,
-        call_method=call_method
-    )
-    service_discoveries[service_name] = discovery  # Store the instance
-
-    tools = []
-    try:
-        discovered_tools = await discovery.discover_tools()
-        print(f"🛠️ Tools for {service_name}: {discovered_tools}")
-
-        for tool in discovered_tools:
-            tool_name = tool['name']
-            tool_description = tool.get('description', '')
-            tool_schema = tool.get('inputSchema', {}) or tool.get('parameters', {})  # Some servers call it 'parameters'
-
-            logger.info(f"🔧 Processing tool '{tool_name}' from service '{service_name}'")
-            logger.debug(f"📝 Raw tool data for '{tool_name}': {json.dumps(tool, indent=2)}")
-
-            if tool_schema and tool_schema.get("type") == "object":
-                logger.info(f"🧬 Found schema for tool '{tool_name}': {json.dumps(tool_schema, indent=2)}")
-
-                try:
-                    input_model = schema_to_pydantic_model(tool_name + "_Input", tool_schema)
-
-                    async def tool_call_wrapper(**kwargs):
-                        try:
-                            validated_args = input_model(**kwargs).dict()
-                            result = await service_discoveries[service_name].call_tool(tool_name, validated_args)
-                            return result
-                        except Exception as e:
-                            logger.error(f"Tool call error: {e}")
-                            return f"Tool call error: {e}"
-
-                    structured_tool = StructuredTool.from_function(
-                        name=tool_name,
-                        description=tool_description,
-                        args_schema=input_model,
-                        func=lambda **kwargs: asyncio.run(tool_call_wrapper(**kwargs))  # added asyncio.run
-                    )
-
-                    tools.append(structured_tool)
-                    logger.info(f"✅ Loaded StructuredTool: {tool_name}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to build StructuredTool for '{tool_name}': {e}")
-            else:
-                logger.info(f"📦 No schema found for '{tool_name}'. Falling back to generic Tool with __arg1")
-
-                async def fallback_tool_call_wrapper(x):
-                    try:
-                        result = await service_discoveries[service_name].call_tool(tool_name, {"__arg1": x})
-                        return result
-                    except Exception as e:
-                        logger.error(f"Fallback tool call error: {e}")
-                        return f"Fallback tool call error: {e}"
-
-                fallback_tool = Tool(
-                    name=tool_name,
-                    description=tool_description,
-                    func=lambda x: asyncio.run(fallback_tool_call_wrapper(x))  # added asyncio.run
-                )
-
-                tools.append(fallback_tool)
-                logger.info(f"✅ Loaded fallback Tool: {tool_name}")
-
-    except Exception as e:
-        logger.error(f"❌ Tool Discovery Error for {service_name}: {e}")
-    finally:
-        logger.info(f"🏁 Finished processing tools for service: {service_name}")
-        return tools
-
-
-async def load_all_tools():
-    """Async function to load tools from all services with comprehensive logging."""
-    print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
-
-    tool_services = [
-        ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
-        ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
-        ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call")
-    ]
-
-    try:
-        # Run docker ps to verify containers
-        docker_ps_result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
-        print(docker_ps_result.stdout)
-
-        service_discoveries = {}
-
-        # Gather tools from all services
-        # 🛠️ Pass service_discoveries in the call
-        all_service_tools = await asyncio.gather(
-            *[get_tools_for_service(service, command, discovery_method, call_method, service_discoveries)
-              for service, command, discovery_method, call_method in tool_services]
+        self.log.info(
+            f"MCP client/{self.name}: Connected to server with tools: {', '.join(self.tool_by_name)}",
         )
 
-        # Add local tools
-        print("🔍 Loading Local Tools:")
-        local_tools = load_local_tools_from_folder("tools")
-        print(f"🧰 Local Tools Found: {[tool.name for tool in local_tools]}")
+    async def close(self):
+        """Properly clean up the session and streams."""
+        if self._session_context:
+            await self._session_context.__aexit__(None, None, None)
 
-        # Define all_tools before using it
-        all_tools = []
+        if self._streams_context:
+            await self._streams_context.__aexit__(None, None, None)
 
-        # Combine all tools
-        for tools_list in all_service_tools:
-            if tools_list:
-                all_tools.extend(tools_list)
-        all_tools.extend(local_tools)
+    def mcp_tool_wrapper(self, mcp_tool: Tool) -> StructuredTool:
+        """Wraps MCP tool functions into LangChain Tool objects."""
 
-        print("🔧 Comprehensive Tool Discovery Results:")
-        print("✅ All Discovered Tools:", [t.name for t in all_tools])
+        async def tool_coro(**kwargs) -> dict:
+            self.log.debug(
+                f"MCP client/{self.name}: Calling tool {mcp_tool.name} with arguments {kwargs}"
+            )
+            result = await self.session.call_tool(mcp_tool.name, arguments=kwargs)
+            return json.loads(result.content[0].text)
 
-        if not all_tools:
-            print("🚨 WARNING: NO TOOLS DISCOVERED 🚨")
-            print("Potential Issues:")
-            print("1. Docker containers not running")
-            print("2. Incorrect discovery methods")
-            print("3. Network/communication issues")
-            print("4. Missing tool configuration")
+        return StructuredTool(
+            name=mcp_tool.name,
+            coroutine=tool_coro,
+            description=mcp_tool.description,
+            args_schema=mcp_tool.inputSchema,
+        )
 
-        return all_tools
+# Modified load_all_tools function
+async def load_all_tools():
+    print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
+    mcp_servers = [
+        ("selector-mcp", ["selector-mcp", "python3", "mcp_server.py", "--oneshot"]),
+        ("github-mcp", ["github-mcp", "node", "dist/index.js"]),
+        ("google-maps-mcp", ["google-maps-mcp", "node", "dist/index.js"]),
+        ("sequentialthinking-mcp", ["sequentialthinking-mcp", "node", "dist/index.js"]),
+        ("slack-mcp", ["slack-mcp", "node", "dist/index.js"]),
+        ("excalidraw-mcp", ["excalidraw-mcp", "node", "dist/index.js"]),
+        ("filesystem-mcp", ["filesystem-mcp", "node", "/app/dist/index.js", "/projects"]),
+        ("brave-search-mcp", ["brave-search-mcp", "node", "dist/index.js"])
+    ]
 
-    except Exception as e:
-        print(f"❌ CRITICAL TOOL DISCOVERY ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
+    all_tools = []
+    for name, command in mcp_servers:
+        client = MCPClient(name, command)
+        try:
+            await client.connect()
+            if client.tools:
+                all_tools.extend(client.tools)
+            await client.close()
+        except Exception as e:
+            logger.error(f"Error connecting to {name}: {e}")
 
+    # Load local tools
+    local_tools = load_local_tools_from_folder("tools")
+    all_tools.extend(local_tools)
+
+    print("🔧 All bound tools:", [t.name for t in all_tools])
+    return all_tools
 
 # Use asyncio to run the async function and get tools
 valid_tools = asyncio.run(load_all_tools())
@@ -1002,7 +765,6 @@ Facilitates a detailed, step-by-step thinking process for problem-solving and an
 THOUGHT PROCESS: Before taking any action, clearly explain your thought process and why you're choosing a specific tool.
 """
 
-
 @traceable
 def select_tools(state: MessagesStateWithSelection):
     messages = state.get("messages", [])
@@ -1073,66 +835,26 @@ def assistant(state: MessagesStateWithSelection):
     logger.warning("⚠️ Empty response from LLM")
     return {"messages": []}
 
-
-@traceable
-async def handle_tool_response(state: MessagesStateWithSelection):  # Assuming you have a State type defined
-    messages = state.get("messages", [])
-    last_message = messages[-1]
-    if isinstance(last_message, ToolMessage):
-        tool_name = last_message.name
-        tool_args = last_message.content
-        logger.info(f"Handling tool response for: {tool_name} with args: {tool_args}")
-        try:
-            # *** THIS IS WHERE YOU CALL YOUR ACTUAL TOOL ***
-            tool_result = await call_the_actual_tool(tool_name, tool_args)  # Replace with your tool call
-            logger.info(f"Tool execution result: {tool_result}")
-            ai_message = AIMessage(content=str(tool_result))  # Format as AIMessage
-            return {"messages": messages + [ai_message]}  # Add to conversation
-        except Exception as e:
-            logger.error(f"Error executing tool: {e}", exc_info=True)
-            return {"messages": messages + [AIMessage(content=f"Error: {e}")], "error": True}
-    else:
-        return {"messages": messages}
-
-
-@traceable
-def tools_condition(state: MessagesStateWithSelection):
-    messages = state.get("messages", [])
-
-    last_message = messages[-1] if messages else None
-
-    # 🚀 Case 1: tool_calls present, need to invoke tool
-    if isinstance(last_message, AIMessage) and hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "tools"
-
-    # 🔁 Case 2: ToolMessage was added and needs follow-up
-    if any(isinstance(m, ToolMessage) for m in messages):
-        return "handle_tool_response"
-
-    # ✅ No tool flow needed — done
-    return END
-
-
 class State(TypedDict):
     messages: Annotated[list, add_messages]
     selected_tools: list[str]
 
-
 graph_builder = StateGraph(State)
+
 graph_builder.add_node("assistant", assistant)
 graph_builder.add_node("select_tools", select_tools)
-graph_builder.add_node("handle_tool_response", handle_tool_response)  # Add the handler
 
+# ToolNode for calling actual tools
 tool_node = ToolNode(tools=valid_tools)
 graph_builder.add_node("tools", tool_node)
 
+# 🧠 Conditional: assistant → tools or END
 graph_builder.add_conditional_edges(
     "assistant",
     tools_condition,
-    path_map={"tools": "handle_tool_response", END: END}  # Correct routing
+    path_map={"tools": "tools", END: END}
 )
-graph_builder.add_edge("handle_tool_response", "assistant")  # Handler goes back to assistant
-graph_builder.add_edge("tools", "select_tools")
+
 graph_builder.add_edge("select_tools", "assistant")
 graph_builder.add_edge(START, "select_tools")
 
