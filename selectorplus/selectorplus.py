@@ -417,9 +417,6 @@ async def load_all_tools():
               for service, command, discovery_method, call_method in tool_services]
             )
 
-        # Flatten the list of tools
-        dynamic_tools = [tool for service_tools in all_service_tools for tool in all_service_tools]
-
         # Add local tools
         print("🔍 Loading Local Tools:")
         local_tools = load_local_tools_from_folder("tools")
@@ -987,16 +984,20 @@ THOUGHT PROCESS: Before taking any action, clearly explain your thought process 
 
 @traceable
 def select_tools(state: MessagesStateWithSelection):
-    last_user_message = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
+    messages = state.get("messages", [])  # <-- Get the messages from state
+    last_user_message = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
+
     if last_user_message:
         query = last_user_message.content
-        relevant_docs = vector_store.similarity_search(query, k=8)  # top 8 tools
+        relevant_docs = vector_store.similarity_search(query, k=8)
         selected_tool_names = [doc.metadata["tool_name"] for doc in relevant_docs]
-
         logger.info(f"🔍 Tool selection for '{query}': {selected_tool_names}")
-        return {"selected_tools": selected_tool_names}
-    return {"selected_tools": []}
-@traceable
+
+        return {
+            "messages": messages,  # <-- This is critical
+            "selected_tools": selected_tool_names
+        }
+
 @traceable
 def assistant(state: MessagesStateWithSelection):
     messages = state.get("messages", [])
@@ -1014,7 +1015,7 @@ def assistant(state: MessagesStateWithSelection):
     
     if hasattr(response, "tool_calls") and response.tool_calls:
         logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
-    return {"messages": response}
+    return {"messages": [response]}
 
 builder = StateGraph(MessagesStateWithSelection)
 
