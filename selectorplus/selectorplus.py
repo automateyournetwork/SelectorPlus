@@ -14,6 +14,7 @@ import google.generativeai as genai
 from pydantic import BaseModel, Field
 from mcp.client.stdio import stdio_client
 from langchain_core.documents import Document
+from langchain_core.messages import ToolMessage
 from langchain_core.messages import BaseMessage
 from langchain.tools import Tool, StructuredTool
 from langgraph.graph.message import add_messages
@@ -125,6 +126,13 @@ def schema_to_pydantic_model(name: str, schema: dict):
     return type(name, (BaseModel,), namespace)
 
 logger = logging.getLogger(__name__)
+
+class MessagesStateWithSelection(dict):
+    messages: List[Union[HumanMessage, AIMessage, ToolMessage]]
+    selected_tools: List[str]
+
+    def __init__(self, messages: List[Union[HumanMessage, AIMessage, ToolMessage]] = [], selected_tools: List[str] = []):
+        super().__init__(messages=messages, selected_tools=selected_tools)
 
 class MCPToolDiscovery:
     def __init__(self, container_name: str, command: List[str], discovery_method: str = "tools/discover", call_method: str = "tools/call"):
@@ -984,7 +992,7 @@ THOUGHT PROCESS: Before taking any action, clearly explain your thought process 
 
 @traceable
 def select_tools(state: MessagesStateWithSelection):
-    messages = state.get("messages", [])  # <-- Get the messages from state
+    messages = state.get("messages", [])
     last_user_message = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
 
     if last_user_message:
@@ -994,7 +1002,7 @@ def select_tools(state: MessagesStateWithSelection):
         logger.info(f"🔍 Tool selection for '{query}': {selected_tool_names}")
 
         return {
-            "messages": messages,  # <-- This is critical
+            "messages": messages,
             "selected_tools": selected_tool_names
         }
 
@@ -1002,9 +1010,8 @@ def select_tools(state: MessagesStateWithSelection):
 def assistant(state: MessagesStateWithSelection):
     messages = state.get("messages", [])
     selected_tool_names = state.get("selected_tools", [])
-    
-    tools_to_use = [tool for tool in valid_tools if tool.name in selected_tool_names]
 
+    tools_to_use = [tool for tool in valid_tools if tool.name in selected_tool_names]
     if not tools_to_use:
         logger.warning("🤷 No tools selected, using all tools")
         tools_to_use = valid_tools
@@ -1012,10 +1019,37 @@ def assistant(state: MessagesStateWithSelection):
     llm_with_selected_tools = llm.bind_tools(tools_to_use)
     new_messages = [SystemMessage(content=system_msg)] + messages
     response = llm_with_selected_tools.invoke(new_messages)
-    
+
+    # 🛠️ Tool call path (first pass)
     if hasattr(response, "tool_calls") and response.tool_calls:
         logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
-    return {"messages": [response]}
+
+        tool_messages = []
+        for call in response.tool_calls:
+            tool_messages.append(
+                ToolMessage(
+                    tool_call_id=call["id"],
+                    name=call["name"],
+                    content=json.dumps(call["args"]) if isinstance(call["args"], dict) else str(call["args"]),
+                )
+            )
+        return {"messages": messages + [response] + tool_messages}
+
+    # 🧠 Second pass: LLM follow-up after tool response
+    if any(isinstance(msg, ToolMessage) for msg in messages):
+        logger.info("🔁 Processing follow-up after tool result")
+        followup = llm_with_selected_tools.invoke([SystemMessage(content=system_msg)] + messages)
+        if hasattr(followup, "content"):
+            return {"messages": messages + [followup]}
+
+    # ✅ Final response from LLM (no tools)
+    if hasattr(response, "content") and response.content:
+        logger.info(f"🧠 Assistant response: {response.content}")
+        return {"messages": messages + [response]}  # FIXED: Keep message history
+
+    # 🚨 Fallback
+    logger.warning("⚠️ Empty response from LLM")
+    return {"messages": messages}  # FIXED: Keep message history even on empty responses
 
 builder = StateGraph(MessagesStateWithSelection)
 
@@ -1025,8 +1059,15 @@ builder.add_node("tools", ToolNode(valid_tools))
 
 builder.add_edge(START, "select_tools")
 builder.add_edge("select_tools", "assistant")
+
+# this handles tool calls ➝ tools node
 builder.add_conditional_edges("assistant", tools_condition)
+
+# this loops back to assistant after tool result
 builder.add_edge("tools", "assistant")
+
+# optional: after final assistant message (no tool call), graph ends
+builder.add_edge("assistant", END)
 
 compiled_graph = builder.compile()
 
