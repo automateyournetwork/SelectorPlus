@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from langsmith import traceable
 import google.generativeai as genai
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 from mcp.client.stdio import stdio_client
 from langchain_core.documents import Document
 from langchain_core.messages import ToolMessage
@@ -1045,31 +1046,31 @@ def assistant(state: MessagesStateWithSelection):
     # ✅ Final response from LLM (no tools)
     if hasattr(response, "content") and response.content:
         logger.info(f"🧠 Assistant response: {response.content}")
-        return {"messages": messages + [response]}  # FIXED: Keep message history
+        return {"messages": [response]}
 
     # 🚨 Fallback
     logger.warning("⚠️ Empty response from LLM")
-    return {"messages": messages}  # FIXED: Keep message history even on empty responses
+    return {"messages": []}
 
-builder = StateGraph(MessagesStateWithSelection)
+class State(TypedDict):
+    messages: Annotated[list, add_messages]
+    selected_tools: list[str]
 
-builder.add_node("select_tools", select_tools)
-builder.add_node("assistant", assistant)
-builder.add_node("tools", ToolNode(valid_tools))
+graph_builder = StateGraph(State)
+graph_builder.add_node("assistant", assistant)
+graph_builder.add_node("select_tools", select_tools)
 
-builder.add_edge(START, "select_tools")
-builder.add_edge("select_tools", "assistant")
+tool_node = ToolNode(tools=valid_tools)
+graph_builder.add_node("tools", tool_node)
 
-# this handles tool calls ➝ tools node
-builder.add_conditional_edges("assistant", tools_condition)
-
-# this loops back to assistant after tool result
-builder.add_edge("tools", "assistant")
-
-# optional: after final assistant message (no tool call), graph ends
-builder.add_edge("assistant", END)
-
-compiled_graph = builder.compile()
+graph_builder.add_conditional_edges(
+    "assistant",
+    tools_condition,
+)
+graph_builder.add_edge("tools", "select_tools")
+graph_builder.add_edge("select_tools", "assistant")
+graph_builder.add_edge(START, "select_tools")
+compiled_graph = graph_builder.compile()
 
 logger.info("🚀 Selector Plus LangGraph compiled successfully")
 
