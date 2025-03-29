@@ -1030,16 +1030,22 @@ def assistant(state: MessagesStateWithSelection):
 
     llm_with_selected_tools = llm.bind_tools(tools_to_use)
     new_messages = [SystemMessage(content=system_msg)] + messages
-    response = llm_with_selected_tools.invoke(new_messages)
+    try:
+        response = llm_with_selected_tools.invoke(new_messages)
+        if not isinstance(response, AIMessage):  # Ensure it's an AIMessage
+            response = AIMessage(content=str(response))  # Coerce to AIMessage
+    except Exception as e:
+        logger.error(f"Error invoking LLM: {e}", exc_info=True)
+        response = AIMessage(content=f"LLM Error: {e}")  # Ensure it's an AIMessage
 
     # 🛠️ Tool call path (first pass)
-    if hasattr(response, "tool_calls") and response.tool_calls:
+    if response and hasattr(response, "tool_calls") and response.tool_calls:
         logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
-        logger.info(f"Response: {response}")  # Log the entire response
+        logger.info(f"Response: {response}")
 
         tool_messages = []
         for call in response.tool_calls:
-            logger.info(f"Tool Call: {call}")  # Log each tool call
+            logger.info(f"Tool Call: {call}")
             try:
                 args_str = json.dumps(call["args"]) if isinstance(call["args"], dict) else str(call["args"])
             except Exception as e:
@@ -1050,27 +1056,31 @@ def assistant(state: MessagesStateWithSelection):
                 name=call["name"],
                 content=args_str,
             )
-            logger.info(f"Tool Message: {tool_message}")  # Log the ToolMessage
+            logger.info(f"Tool Message: {tool_message}")
             tool_messages.append(tool_message)
-        logger.info(f"Tool Messages: {tool_messages}")  # Log the list of ToolMessages
-        return {"messages": messages + [response] + tool_messages}
+        logger.info(f"Tool Messages: {tool_messages}")
+        return {
+            "messages": messages + [response],  # response must be last
+            "tool_messages": tool_messages      # optionally stash if needed
+        }
+
 
     # 🧠 Second pass: LLM follow-up after tool response
     if any(isinstance(msg, ToolMessage) for msg in messages):
         logger.info("🔁 Processing follow-up after tool result")
         followup = llm_with_selected_tools.invoke([SystemMessage(content=system_msg)] + messages)
-        if hasattr(followup, "content"):
-            return {"messages": messages + [followup]}
+        if not isinstance(followup, AIMessage):  # Ensure it's an AIMessage
+            followup = AIMessage(content=str(followup))  # Coerce to AIMessage
+        return {"messages": messages + [followup]}
 
     # ✅ Final response from LLM (no tools)
-    if hasattr(response, "content") and response.content:
+    if response and hasattr(response, "content") and response.content:
         logger.info(f"🧠 Assistant response: {response.content}")
-        return {"messages": [response]}
+        return {"messages": messages + [response]}
 
     # 🚨 Fallback
     logger.warning("⚠️ Empty response from LLM")
-    return {"messages": []}
-
+    return {"messages": messages + [AIMessage(content="No response from LLM.") ]} # Ensure it's an AIMessage
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
@@ -1079,17 +1089,49 @@ class State(TypedDict):
 @traceable
 def tools_condition(state: State) -> str:
     messages = state.get("messages", [])
-    if any(isinstance(m, ToolMessage) for m in messages):
-        return "tools"
+    last_message = messages[-1]  # Get the last message
+
+    if isinstance(last_message, AIMessage) and hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return "tools"  # Only go to tools if it's an AIMessage with tool_calls
     return "__end__"
 
+@traceable
+async def handle_tool_response(state: State):
+    messages = state.get("messages", [])
+    last_message = messages[-1]
+
+    logger.info("Entering handle_tool_response node")
+    logger.info(f"Input messages to handle_tool_response: {messages}")
+
+    if isinstance(last_message, ToolMessage):
+        tool_name = last_message.name
+        tool_output = last_message.content
+
+        logger.info(f"Handling tool response from {tool_name}: {tool_output}")
+
+        try:
+            start_time = time.time()
+            llm_response = await llm_with_tools.invoke(messages + [AIMessage(content=str(tool_output))])
+            end_time = time.time()
+            logger.info(f"LLM invoke took {end_time - start_time} seconds")
+            logger.info(f"LLM response: {llm_response}")
+            return {"messages": [llm_response]}  # Return a list containing ONLY the AIMessage
+        except Exception as e:
+            logger.error(f"Error in handle_tool_response: {e}", exc_info=True)
+            error_message = AIMessage(content=f"Tool call error: {e}")
+            return {"messages": [error_message], "error": True}  # Return a list with an error AIMessage
+    else:
+        logger.warning("handle_tool_response received non-ToolMessage")
+        # Handle the unexpected case gracefully - return an empty AIMessage
+        empty_response = AIMessage(content="Unexpected input to handle_tool_response.")
+        return {"messages": [empty_response]}
 
 graph_builder = StateGraph(State)
-graph_builder.add_node("assistant", assistant)
 graph_builder.add_node("select_tools", select_tools)
-
+graph_builder.add_node("assistant", assistant)
 tool_node = ToolNode(tools=valid_tools)
 graph_builder.add_node("tools", tool_node)
+graph_builder.add_node("handle_tool_response", handle_tool_response)  # Add the new node
 
 graph_builder.add_conditional_edges(
     "assistant",
@@ -1100,12 +1142,13 @@ graph_builder.add_conditional_edges(
     }
 )
 
-graph_builder.add_edge("tools", "select_tools")
 graph_builder.add_edge("select_tools", "assistant")
+graph_builder.add_edge("assistant", "tools")
+graph_builder.add_edge("tools", "handle_tool_response")  # Tool output goes to handler
+graph_builder.add_edge("handle_tool_response", "assistant")  # Handler's output goes to assistant
 graph_builder.add_edge(START, "select_tools")
 
 compiled_graph = graph_builder.compile()
-
 logger.info("🚀 Selector Plus LangGraph compiled successfully")
 
 # CLI Loop
