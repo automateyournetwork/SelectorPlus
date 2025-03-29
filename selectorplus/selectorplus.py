@@ -317,7 +317,6 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
     service_discoveries[service_name] = discovery  # Store the instance
 
     tools = []
-
     try:
         discovered_tools = await discovery.discover_tools()
         print(f"🛠️ Tools for {service_name}: {discovered_tools}")
@@ -336,13 +335,20 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
                 try:
                     input_model = schema_to_pydantic_model(tool_name + "_Input", tool_schema)
 
+                    async def tool_call_wrapper(**kwargs):
+                        try:
+                            validated_args = input_model(**kwargs).dict()
+                            result = await service_discoveries[service_name].call_tool(tool_name, validated_args)
+                            return result
+                        except Exception as e:
+                            logger.error(f"Tool call error: {e}")
+                            return f"Tool call error: {e}"
+
                     structured_tool = StructuredTool.from_function(
                         name=tool_name,
                         description=tool_description,
                         args_schema=input_model,
-                        func=lambda **kwargs: asyncio.run(
-                            service_discoveries[service_name].call_tool(tool_name, kwargs)
-                        )
+                        func=lambda **kwargs: asyncio.run(tool_call_wrapper(**kwargs)) # added asyncio.run
                     )
 
                     tools.append(structured_tool)
@@ -352,12 +358,18 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
             else:
                 logger.info(f"📦 No schema found for '{tool_name}'. Falling back to generic Tool with __arg1")
 
+                async def fallback_tool_call_wrapper(x):
+                    try:
+                        result = await service_discoveries[service_name].call_tool(tool_name, {"__arg1": x})
+                        return result
+                    except Exception as e:
+                        logger.error(f"Fallback tool call error: {e}")
+                        return f"Fallback tool call error: {e}"
+
                 fallback_tool = Tool(
                     name=tool_name,
                     description=tool_description,
-                    func=lambda x: asyncio.run(
-                        service_discoveries[service_name].call_tool(tool_name, {"__arg1": x})
-                    )
+                    func=lambda x: asyncio.run(fallback_tool_call_wrapper(x)) # added asyncio.run
                 )
 
                 tools.append(fallback_tool)
@@ -368,7 +380,7 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
     finally:
         logger.info(f"🏁 Finished processing tools for service: {service_name}")
         return tools
-
+        
 async def load_all_tools():
     """Async function to load tools from all services with comprehensive logging."""
     print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
@@ -449,27 +461,21 @@ sys_msg = SystemMessage(content="You are an AI assistant with dynamically discov
 
 @traceable
 def assistant(state: MessagesState):
-    """Handles user questions, detects PCAP files, and dynamically invokes tools when needed."""
-    
+    """Handles user questions and dynamically invokes tools when needed."""
     messages = state.get("messages", [])
-
-    # ✅ Extract latest user message
     latest_user_message = next((msg for msg in reversed(messages) if isinstance(msg, HumanMessage)), None)
     if not latest_user_message:
         return {"messages": [AIMessage(content="⚠️ No valid question detected.")]}
 
     logger.info(f"🛠️ Processing Message: {latest_user_message.content}")
-
-    # ✅ Preserve existing messages, including previous PCAP analysis
-    new_messages = [sys_msg] + messages  
-
-    # ✅ Invoke LLM with tools
+    new_messages = [
+        SystemMessage(
+            content="You are a helpful file system assistant. You have access to tools that can interact with the file system. Carefully analyze the user's request and choose the tool that BEST matches the user's INTENTION. Think step-by-step. Explain your reasoning BEFORE selecting a tool. If a tool is not suitable, say why. If the user asks to create a file, use write_file. If the user asks to read a file, use read_file. If the user asks to list the files in a directory, use list_directory."
+        )
+    ] + messages
     response = llm_with_tools.invoke(new_messages)
-
-    # ✅ Log tool calls before returning response
     if hasattr(response, "tool_calls") and response.tool_calls:
         logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
-
     return {"messages": response}
 
 # ✅ Build the LangGraph

@@ -142,10 +142,9 @@ if prompt := st.chat_input("Enter your message"):
                                                         (
                                                             m["content"]
                                                             for m in json_data["messages"]
-                                                            if m["tool_call_id"]
-                                                            == tool_call["id"]
+                                                            if "tool_call_id" in m and m.get("tool_call_id") == tool_call["id"]
                                                         ),
-                                                        None,
+                                                        None,  # Default value if no matching message is found
                                                     )
                                                     if tool_output:
                                                         try:
