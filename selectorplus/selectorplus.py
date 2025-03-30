@@ -20,7 +20,8 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from typing import Dict, Any, List, Optional, Union, Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt.tool_node import tools_condition, ToolNode
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langgraph.pregel.retry import RetryPolicy
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
 
@@ -396,6 +397,7 @@ def format_tool_descriptions(tools: List[Tool]) -> str:
     )
 
 embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+
 vector_store = InMemoryVectorStore(embedding=embedding)
 
 tool_documents = [
@@ -406,6 +408,7 @@ tool_documents = [
 document_ids = vector_store.add_documents(tool_documents)
 
 print("🔧 All bound tools:", [t.name for t in valid_tools])
+
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
 llm_with_tools = llm.bind_tools(valid_tools)
 
@@ -491,6 +494,7 @@ def select_tools(state: GraphState):
     ])
 
     tool_descriptions = "\n".join(f"- {name}: {desc}" for name, desc in tool_infos)
+    
     selection_prompt = tool_prompt.format_messages(query=query, tools=tool_descriptions)
 
     try:
@@ -528,7 +532,7 @@ THOUGHT PROCESS: Before taking any action, clearly explain your thought process 
 
 @traceable
 def assistant(state: GraphState):
-    """Handles assistant logic and LLM interaction."""
+    """Handles assistant logic and LLM interaction, with conditional logic."""
     messages = state.get("messages", [])
     context = state.get("context", {})
 
@@ -544,7 +548,7 @@ def assistant(state: GraphState):
     formatted_system_msg = system_msg.format(tool_descriptions=formatted_tool_descriptions)
     new_messages = [SystemMessage(content=formatted_system_msg)] + messages
 
-    response = None  # ✅ Ensure response always exists
+    response = None
     try:
         logger.info(f"assistant: Invoking LLM with new_messages: {new_messages}")
 
@@ -565,34 +569,13 @@ def assistant(state: GraphState):
         response = AIMessage(content=f"LLM Error: {e}")
 
     if response and hasattr(response, "tool_calls") and response.tool_calls:
-        return {"messages": [response], "context": context}
+        # Pass control to the 'tools' node
+        return {"messages": [response], "context": context, "__next__": "tools"}
     elif response and hasattr(response, "content") and response.content:
-        return {"messages": [response], "context": context}
+        # Pass control to the '__end__' node
+        return {"messages": [response], "context": context, "__next__": "__end__"}
     else:
-        return {"messages": [AIMessage(content="No response from LLM. Returning to user.")], "context": context}
-
-
-def tools_condition(state: GraphState) -> str:
-    """Determines which node to go to after the assistant node."""
-    messages = state.get("messages", [])
-    if not messages:
-        logger.info("tools_condition: No messages, going to START")
-        return START
-    last_message = messages[-1]
-    if isinstance(last_message, AIMessage):
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            logger.info("tools_condition: AIMessage with tool_calls, go to tools")
-            return "tools"
-        else:
-            logger.info("tools_condition: AIMessage with content, go to __end__")
-            return "__end__"
-    elif isinstance(last_message, ToolMessage):
-        logger.info("tools_condition: ToolMessage, go to handle_tool_response")
-        return "handle_tool_response"
-    else:
-        logger.info("tools_condition: Default, go to assistant")
-        return "assistant"
-
+        return {"messages": [AIMessage(content="No response from LLM. Returning to user.")], "context": context, "__next__": "__end__"}
 
 graph_builder = StateGraph(GraphState)
 graph_builder.add_node("select_tools", select_tools)
@@ -601,13 +584,14 @@ graph_builder.add_node("tools", ContextAwareToolNode(tools=valid_tools))
 
 graph_builder.add_conditional_edges(
     "assistant",
-    tools_condition,
+    lambda state: state.get("__next__", "__end__"),
     path_map={
         "tools": "tools",
         "__end__": END,
     }
 )
 
+graph_builder.add_edge("tools", "select_tools")
 graph_builder.add_edge("select_tools", "assistant")
 graph_builder.add_edge(START, "select_tools")
 
