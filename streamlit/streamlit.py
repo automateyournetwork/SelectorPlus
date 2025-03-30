@@ -134,40 +134,47 @@ if prompt := st.chat_input("Enter your message"):
                                     if msg.get("type") == "ai":
                                         if "content" in msg:
                                             ai_messages.append(msg["content"])
+
+                                    # ✅ Catch tool responses that have "tool_call_id" (ToolMessage)
+                                    elif "tool_call_id" in msg and "content" in msg:
+                                        try:
+                                            tool_response = json.loads(msg["content"])
+                                            # Support structured {"result": {..., content: "..."}}
+                                            if isinstance(tool_response, dict):
+                                                if "result" in tool_response:
+                                                    result = tool_response["result"]
+                                                    if isinstance(result, dict) and "content" in result:
+                                                        ai_messages.append(result["content"])
+                                                    else:
+                                                        ai_messages.append(str(result))
+                                                elif "content" in tool_response:
+                                                    ai_messages.append(tool_response["content"])
+                                            else:
+                                                ai_messages.append(str(tool_response))
+                                        except json.JSONDecodeError:
+                                            ai_messages.append(msg["content"])  # Fallback if it's just raw text
+
+                                        # 🛠️ Handle tool calls like Slack, if present
                                         if "tool_calls" in msg:
                                             for tool_call in msg["tool_calls"]:
                                                 if tool_call["name"] == "slack_post_message":
-                                                    # Extract relevant info from tool output
                                                     tool_output = next(
                                                         (
                                                             m["content"]
                                                             for m in json_data["messages"]
-                                                            if "tool_call_id" in m and m.get("tool_call_id") == tool_call["id"]
+                                                            if m.get("tool_call_id") == tool_call["id"]
                                                         ),
-                                                        None,  # Default value if no matching message is found
+                                                        None,
                                                     )
                                                     if tool_output:
                                                         try:
-                                                            tool_output_json = json.loads(
-                                                                tool_output
-                                                            )
+                                                            tool_output_json = json.loads(tool_output)
                                                             if tool_output_json.get("ok"):
-                                                                ai_messages.append(
-                                                                    "Message sent successfully to Slack."
-                                                                )
+                                                                ai_messages.append("✅ Message sent successfully to Slack.")
                                                             else:
-                                                                ai_messages.append(
-                                                                    "Message sending to Slack failed."
-                                                                )
+                                                                ai_messages.append("⚠️ Message sending to Slack failed.")
                                                         except json.JSONDecodeError:
-                                                            ai_messages.append(
-                                                                "Error processing Slack response."
-                                                            )
-                                                # Add handling for other tools here if needed
-                                                # else:
-                                                #     # Default: Just show the AI content
-                                                #     if "content" in msg:
-                                                #         ai_messages.append(msg["content"])
+                                                            ai_messages.append("❌ Error processing Slack response.")
 
                         except json.JSONDecodeError:
                             st.error(f"JSON Decode Error in line: {line}")

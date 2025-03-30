@@ -1,12 +1,10 @@
 #!/usr/bin/env node
+console.log("🚀 Server starting...");
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 import * as repository from './operations/repository.js';
 import * as files from './operations/files.js';
@@ -27,6 +25,26 @@ import {
 } from './common/errors.js';
 import { VERSION } from "./common/version.js";
 
+// Explicitly define schemas (CRITICAL FIX)
+const ListToolsRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  method: z.literal("list_tools"),
+  params: z.object({}).optional(),
+  id: z.union([z.string(), z.number()]),
+});
+
+const CallToolRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  method: z.literal("call_tool"),
+  params: z.object({
+    name: z.string(),
+    arguments: z.record(z.any()).optional(),
+  }),
+  id: z.union([z.string(), z.number()]),
+});
+
+console.log("✅ Schema definitions complete");
+
 const server = new Server(
   {
     name: "github-mcp-server",
@@ -39,9 +57,11 @@ const server = new Server(
   }
 );
 
+console.log("✅ Server initialized");
+
 function formatGitHubError(error: GitHubError): string {
   let message = `GitHub API Error: ${error.message}`;
-  
+
   if (error instanceof GitHubValidationError) {
     message = `Validation Error: ${error.message}`;
     if (error.response) {
@@ -62,7 +82,9 @@ function formatGitHubError(error: GitHubError): string {
   return message;
 }
 
+console.log("🔧 Registering list_tools handler...");
 server.setRequestHandler(ListToolsRequestSchema, async () => {
+  console.log("📩 Received list_tools request");
   return {
     tools: [
       {
@@ -198,8 +220,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     ],
   };
 });
+console.log("✅ Successfully registered list_tools handler.");
 
+console.log("🔧 Registering call_tool handler...");
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  console.log("📩 Received call_tool request:", JSON.stringify(request, null, 2));
   try {
     if (!request.params.arguments) {
       throw new Error("Arguments are required");
@@ -469,6 +494,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     throw error;
   }
 });
+console.log("✅ Successfully registered call_tool handler.");
 
 async function runServer() {
   const transport = new StdioServerTransport();

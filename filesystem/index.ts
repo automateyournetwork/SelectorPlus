@@ -424,17 +424,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           "without reading the actual content. Only works within allowed directories.",
         inputSchema: zodToJsonSchema(GetFileInfoArgsSchema) as ToolInput,
       },
-      {
-        name: "list_allowed_directories",
-        description:
-          "Returns the list of directories that this server is allowed to access. " +
-          "Use this to understand which directories are available before trying to access files.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-          required: [],
-        },
-      },
     ],
   };
 });
@@ -609,15 +598,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [{ type: "text", text: Object.entries(info)
             .map(([key, value]) => `${key}: ${value}`)
             .join("\n") }],
-        };
-      }
-
-      case "list_allowed_directories": {
-        return {
-          content: [{
-            type: "text",
-            text: `Allowed directories:\n${allowedDirectories.join('\n')}`
-          }],
         };
       }
 
