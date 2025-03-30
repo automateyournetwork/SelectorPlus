@@ -77,7 +77,7 @@ def wrap_dict_input_tool(tool_obj: Tool) -> Tool:
 
 def schema_to_pydantic_model(name: str, schema: dict):
     """Dynamically creates a Pydantic model class from a JSON Schema."""
-    from typing import Any, List, Dict
+    from typing import Any, List, Dict, Optional
     namespace = {"__annotations__": {}}
 
     if schema.get("type") != "object":
@@ -88,6 +88,7 @@ def schema_to_pydantic_model(name: str, schema: dict):
 
     for field_name, field_schema in properties.items():
         json_type = field_schema.get("type", "string")
+        is_optional = field_name not in required_fields
 
         if json_type == "string":
             field_type = str
@@ -115,6 +116,9 @@ def schema_to_pydantic_model(name: str, schema: dict):
         else:
             field_type = Any
 
+        if is_optional:
+            field_type = Optional[field_type]
+
         namespace["__annotations__"][field_name] = field_type
         if field_name in required_fields:
             namespace[field_name] = Field(...)
@@ -122,7 +126,6 @@ def schema_to_pydantic_model(name: str, schema: dict):
             namespace[field_name] = Field(default=None)
 
     return type(name, (BaseModel,), namespace)
-
 
 
 class MCPToolDiscovery:
@@ -215,6 +218,9 @@ class MCPToolDiscovery:
 
         try:
             normalized_args = arguments
+
+            if tool_name == "create_or_update_file" and isinstance(normalized_args, dict) and "sha" in normalized_args and normalized_args["sha"] is None:
+                del normalized_args["sha"]
 
             payload = {
                 "jsonrpc": "2.0",
@@ -422,6 +428,7 @@ class ContextAwareToolNode(ToolNode):
     A specialized ToolNode that handles tool execution and updates the graph state
     based on the tool's response.  It assumes that tools return a dictionary.
     """
+
     def invoke(self, state: GraphState) -> GraphState:
         """
         Executes the tool call specified in the last AIMessage and updates the state.
@@ -447,14 +454,22 @@ class ContextAwareToolNode(ToolNode):
         for tool_call in tool_calls:
             tool = self.tools_by_name[tool_call.name]  # Corrected attribute access
             tool_input = tool_call.args
-            logger.info(f"Calling tool: {tool.name} with args: {tool_input}")
-            tool_response = tool.invoke(tool_input)  # Execute the tool
+
+            logger.info(f"Tool Input (Before Filtering): {tool_input}")  # Logging for debugging
+
+            # Filter out null values from tool_input
+            filtered_tool_input = {k: v for k, v in tool_input.items() if v is not None}
+
+            logger.info(f"Calling tool: {tool.name} with args: {filtered_tool_input}")
+            tool_response = tool.invoke(filtered_tool_input)  # Execute the tool
 
             if not isinstance(tool_response, dict):
-                raise ValueError(f"Tool {tool.name} should return a dictionary, but returned {type(tool_response)}")
-            
+                raise ValueError(
+                    f"Tool {tool.name} should return a dictionary, but returned {type(tool_response)}"
+                )
+
             logger.info(f"Tool {tool.name} returned: {tool_response}")
-            
+
             # Update the context with the tool's output
             context.update(tool_response)
 
@@ -467,7 +482,7 @@ class ContextAwareToolNode(ToolNode):
             messages.append(tool_message)
 
         return {"messages": messages, "context": context}
-
+        
 
 @traceable
 def select_tools(state: GraphState):
@@ -520,6 +535,11 @@ system_msg = """You are a helpful file system and diagramming assistant.
 *Available Tools:
 {tool_descriptions}
 
+IMPORTANT TOOL USAGE GUIDELINES:
+1. GitHub tools require specific parameters:
+   - For creating/updating files, you MUST include: owner, repo, path, content, branch, AND message (for commit message)
+   - Example: create_or_update_file(owner="MyOrg", repo="MyRepo", path="file.md", content="Content", branch="main", message="Commit message")
+
 IMPORTANT: When selecting a tool, follow these strict guidelines:
 1. ALWAYS think step-by-step about what the user is asking for
 2. ONLY use tools that match the user's exact intention
@@ -532,67 +552,95 @@ THOUGHT PROCESS: Before taking any action, clearly explain your thought process 
 
 @traceable
 def assistant(state: GraphState):
-    """Handles assistant logic and LLM interaction, with conditional logic."""
+    """Handles assistant logic and LLM interaction, with support for sequential tool calls."""
     messages = state.get("messages", [])
     context = state.get("context", {})
-
     selected_tool_names = context.get("selected_tools", [])
-    tools_to_use = [tool for tool in valid_tools if tool.name in selected_tool_names]
+    run_mode = context.get("run_mode", "start")
 
-    if not tools_to_use:
-        logger.warning("🤷 No tools selected, using all tools")
-        tools_to_use = valid_tools
+    tools_to_use = [tool for tool in valid_tools if tool.name in selected_tool_names] if selected_tool_names else valid_tools
 
-    llm_with_selected_tools = llm.bind_tools(tools_to_use)
+    # If we're in continuous mode, don't re-select tools
+    if run_mode == "continue":
+        last_tool_message = None
+        # Find the last tool message
+        for msg in reversed(messages):
+            if isinstance(msg, ToolMessage):
+                last_tool_message = msg
+                break
+
+        if last_tool_message:
+            # Add the tool message to ensure proper conversation context
+            new_messages = [SystemMessage(content=system_msg)] + messages
+
+            llm_with_tools = llm.bind_tools(tools_to_use)
+            response = llm_with_tools.invoke(new_messages, config={"tool_choice": "auto"})
+
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                # Continue using tools
+                return {"messages": [response], "context": context, "__next__": "tools"}
+            else:
+                # No more tools to use, return to user
+                return {"messages": [response], "context": context, "__next__": "__end__"}
+
+    # Initial processing or starting a new sequence
+    llm_with_tools = llm.bind_tools(tools_to_use)
     formatted_tool_descriptions = format_tool_descriptions(tools_to_use)
     formatted_system_msg = system_msg.format(tool_descriptions=formatted_tool_descriptions)
     new_messages = [SystemMessage(content=formatted_system_msg)] + messages
 
-    response = None
     try:
         logger.info(f"assistant: Invoking LLM with new_messages: {new_messages}")
-
-        if len(tools_to_use) == 1:
-            selected_tool_name = tools_to_use[0].name
-            logger.info(f"🛠️ Forcing tool call: {selected_tool_name}")
-            tool_choice_config = {"tool_choice": {"type": "function", "function": {"name": selected_tool_name}}}
-        else:
-            tool_choice_config = {"tool_choice": "auto"}
-
-        response = llm_with_selected_tools.invoke(new_messages, config=tool_choice_config)
+        # Always use auto tool choice to allow model to decide which tools to use
+        response = llm_with_tools.invoke(new_messages, config={"tool_choice": "auto"})
+        logger.info(f"Raw LLM Response: {response}")
 
         if not isinstance(response, AIMessage):
             response = AIMessage(content=str(response))
-
     except Exception as e:
         logger.error(f"Error invoking LLM: {e}", exc_info=True)
         response = AIMessage(content=f"LLM Error: {e}")
 
-    if response and hasattr(response, "tool_calls") and response.tool_calls:
-        # Pass control to the 'tools' node
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        # Update context to indicate we're in a tool sequence
+        context["run_mode"] = "continue"
         return {"messages": [response], "context": context, "__next__": "tools"}
-    elif response and hasattr(response, "content") and response.content:
-        # Pass control to the '__end__' node
-        return {"messages": [response], "context": context, "__next__": "__end__"}
     else:
-        return {"messages": [AIMessage(content="No response from LLM. Returning to user.")], "context": context, "__next__": "__end__"}
+        # Reset mode if no tools are called
+        context["run_mode"] = "start"
+        return {"messages": [response], "context": context, "__next__": "__end__"}
 
+@traceable
+def handle_tool_results(state: GraphState):
+    """Handles tool results and determines if more tools should be used."""
+    messages = state.get("messages", [])
+    context = state.get("context", {})
+    
+    # Check if we should continue with more tools or go back to the LLM
+    return {"messages": messages, "context": context, "__next__": "assistant"}
+
+# Graph setup
 graph_builder = StateGraph(GraphState)
 graph_builder.add_node("select_tools", select_tools)
 graph_builder.add_node("assistant", assistant)
 graph_builder.add_node("tools", ContextAwareToolNode(tools=valid_tools))
+graph_builder.add_node("handle_tool_results", handle_tool_results)
 
+# Updated edges
 graph_builder.add_conditional_edges(
     "assistant",
     lambda state: state.get("__next__", "__end__"),
-    path_map={
+    {
         "tools": "tools",
-        "select_tools": "select_tools",  # <- Add this line
+        "select_tools": "select_tools",
         "__end__": END,
     }
 )
 
-graph_builder.add_edge("tools", "select_tools")
+# After tools execute, go to the handler
+graph_builder.add_edge("tools", "handle_tool_results")
+# After handling results, go back to assistant for potential more tool calls
+graph_builder.add_edge("handle_tool_results", "assistant")
 graph_builder.add_edge("select_tools", "assistant")
 graph_builder.add_edge(START, "select_tools")
 
