@@ -20,7 +20,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.vectorstores import InMemoryVectorStore
 from typing import Dict, Any, List, Optional, Union, Annotated
 from langgraph.graph import StateGraph, START, END
-from langchain.prebuilt.tool_node import tools_condition, ToolNode
+from langgraph.prebuilt.tool_node import tools_condition, ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
@@ -28,8 +28,6 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
 
 class GraphState(TypedDict):
     """State class for LangGraph."""
@@ -419,6 +417,8 @@ def select_tools(state: GraphState):
             "messages": messages,
             "context": state.get("context", {}),  # Pass the context
         }
+
+
 
 @traceable
 def assistant(state: GraphState):
