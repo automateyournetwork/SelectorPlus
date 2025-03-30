@@ -20,7 +20,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.vectorstores import InMemoryVectorStore
 from typing import Dict, Any, List, Optional, Union, Annotated
 from langgraph.graph import StateGraph, START, END
-from langgraph.prebuilt.tool_node import tools_condition, ToolNode
+from langchain.prebuilt.tool_node import tools_condition, ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
@@ -350,6 +350,57 @@ def format_tool_descriptions(tools: List[Tool]) -> str:
     """Formats the tool descriptions into a string."""
     return "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
 
+
+class ContextAwareToolNode(ToolNode):
+    """
+    A specialized ToolNode that handles tool execution and updates the graph state
+    based on the tool's response.  It assumes that tools return a dictionary.
+    """
+    def invoke(self, state: GraphState) -> GraphState:
+        """
+        Executes the tool call specified in the last AIMessage and updates the state.
+
+        Args:
+            state: The current graph state.
+
+        Returns:
+            The updated graph state.
+
+        Raises:
+            ValueError: If the last message is not an AIMessage with tool calls.
+        """
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+            raise ValueError("Expected an AIMessage with tool_calls")
+
+        tool_calls = last_message.tool_calls
+        context = state.get("context", {})
+
+        for tool_call in tool_calls:
+            tool = self.tools_by_name[tool_call.name]  # Corrected attribute access
+            tool_input = tool_call.args
+            logger.info(f"Calling tool: {tool.name} with args: {tool_input}")
+            tool_response = tool.invoke(tool_input)  # Execute the tool
+
+            if not isinstance(tool_response, dict):
+                raise ValueError(f"Tool {tool.name} should return a dictionary, but returned {type(tool_response)}")
+            
+            logger.info(f"Tool {tool.name} returned: {tool_response}")
+            
+            # Update the context with the tool's output
+            context.update(tool_response)
+
+            # Create a ToolMessage and add it to the message history
+            tool_message = ToolMessage(
+                tool_call_id=tool_call.id,
+                content=tool_response.get("content", str(tool_response)),  # Ensure content is always a string
+                name=tool_call.name,
+            )
+            messages.append(tool_message)
+
+        return {"messages": messages, "context": context}
 
 
 @traceable
