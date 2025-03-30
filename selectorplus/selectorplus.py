@@ -1,12 +1,10 @@
 import os
 import json
-import copy
 import asyncio
 import inspect
 import logging
 import importlib
 import subprocess
-import uuid
 from functools import wraps
 from dotenv import load_dotenv
 from langsmith import traceable
@@ -17,12 +15,14 @@ from langchain_core.messages import ToolMessage
 from langchain_core.messages import BaseMessage
 from langchain.tools import Tool, StructuredTool
 from langgraph.graph.message import add_messages
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.vectorstores import InMemoryVectorStore
 from typing import Dict, Any, List, Optional, Union, Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt.tool_node import tools_condition, ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+
 
 load_dotenv()
 
@@ -268,6 +268,65 @@ class MCPToolDiscovery:
             return "Critical Error: tool call failure"
 
 
+async def get_tools_for_service(service_name, command, discovery_method, call_method, service_discoveries):
+    """Enhanced tool discovery for each service."""
+    print(f"🕵️ Discovering tools for: {service_name}")
+    discovery = MCPToolDiscovery(
+        container_name=service_name,
+        command=command,
+        discovery_method=discovery_method,
+        call_method=call_method
+    )
+    service_discoveries[service_name] = discovery  # Store for future tool calls
+
+    tools = []
+    try:
+        discovered_tools = await discovery.discover_tools()
+        print(f"🛠️ Tools for {service_name}: {[t['name'] for t in discovered_tools]}")
+
+        for tool in discovered_tools:
+            tool_name = tool["name"]
+            tool_description = tool.get("description", "")
+            tool_schema = tool.get("inputSchema") or tool.get("parameters", {})
+
+            if tool_schema and tool_schema.get("type") == "object":
+                try:
+                    input_model = schema_to_pydantic_model(tool_name + "_Input", tool_schema)
+
+                    async def tool_call_wrapper(**kwargs):
+                        validated_args = input_model(**kwargs).dict()
+                        return await service_discoveries[service_name].call_tool(tool_name, validated_args)
+
+                    structured_tool = StructuredTool.from_function(
+                        name=tool_name,
+                        description=tool_description,
+                        args_schema=input_model,
+                        func=(lambda tool_name=tool_name, input_model=input_model:
+                            lambda **kwargs: asyncio.run(
+                                service_discoveries[service_name].call_tool(tool_name, input_model(**kwargs).dict())
+                            ))()
+                    )
+
+                    tools.append(structured_tool)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to build structured tool {tool_name}: {e}")
+            else:
+                async def fallback_tool_call_wrapper(x):
+                    return await service_discoveries[service_name].call_tool(tool_name, {"__arg1": x})
+
+                fallback_tool = Tool(
+                    name=tool_name,
+                    description=tool_description,
+                    func=lambda x: asyncio.run(fallback_tool_call_wrapper(x))
+                )
+                tools.append(fallback_tool)
+
+    except Exception as e:
+        logger.error(f"❌ Tool discovery error in {service_name}: {e}", exc_info=True)
+
+    return tools
+
+
 async def load_all_tools():
     """Async function to load tools from different MCP services and local files."""
     print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
@@ -330,6 +389,12 @@ async def load_all_tools():
 # Load tools
 valid_tools = asyncio.run(load_all_tools())
 
+def format_tool_descriptions(tools: List[Tool]) -> str:
+    return "\n".join(
+        f"- `{tool.name}`: {tool.description or 'No description provided.'}"
+        for tool in tools
+    )
+
 embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 vector_store = InMemoryVectorStore(embedding=embedding)
 
@@ -341,7 +406,7 @@ tool_documents = [
 document_ids = vector_store.add_documents(tool_documents)
 
 print("🔧 All bound tools:", [t.name for t in valid_tools])
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.1)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
 llm_with_tools = llm.bind_tools(valid_tools)
 
 def format_tool_descriptions(tools: List[Tool]) -> str:
@@ -403,21 +468,62 @@ class ContextAwareToolNode(ToolNode):
 
 @traceable
 def select_tools(state: GraphState):
-    """Selects tools based on user query."""
     messages = state.get("messages", [])
+    context = state.get("context", {})
     last_user_message = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
 
-    if last_user_message:
-        query = last_user_message.content
-        relevant_docs = vector_store.similarity_search(query, k=8)
-        selected_tool_names = [doc.metadata["tool_name"] for doc in relevant_docs]
-        logger.info(f"🔍 Tool selection for '{query}': {selected_tool_names}")
+    if not last_user_message:
+        return {"messages": messages, "context": context}
 
-        return {
-            "messages": messages,
-            "context": state.get("context", {}),  # Pass the context
-        }
+    query = last_user_message.content
+    relevant_docs = vector_store.similarity_search(query, k=8)
 
+    # Gather tool names and descriptions
+    tool_infos = [
+        (doc.metadata["tool_name"], doc.page_content)
+        for doc in relevant_docs
+    ]
+
+    # LLM prompt: choose best tool
+    tool_prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an intelligent tool selector. Based on the user request and the available tools, pick the name of the best matching tool ONLY. Do not explain. Just output the tool name."),
+        ("human", "User request:\n{query}\n\nAvailable tools:\n{tools}\n\nPick the BEST tool name:")
+    ])
+
+    tool_descriptions = "\n".join(f"- {name}: {desc}" for name, desc in tool_infos)
+    selection_prompt = tool_prompt.format_messages(query=query, tools=tool_descriptions)
+
+    try:
+        tool_selection_response = llm.invoke(selection_prompt)
+        selected_tool_name = tool_selection_response.content.strip().split()[0]  # be strict
+        logger.info(f"🔍 LLM selected tool: {selected_tool_name}")
+    except Exception as e:
+        logger.error(f"⚠️ Tool selection LLM failed: {e}")
+        selected_tool_name = None
+
+    if selected_tool_name:
+        context["selected_tools"] = [selected_tool_name]
+    else:
+        context["selected_tools"] = [t[0] for t in tool_infos]  # fallback to vector results
+
+    return {
+        "messages": messages,
+        "context": context
+    }
+
+system_msg = """You are a helpful file system and diagramming assistant.
+
+*Available Tools:
+{tool_descriptions}
+
+IMPORTANT: When selecting a tool, follow these strict guidelines:
+1. ALWAYS think step-by-step about what the user is asking for
+2. ONLY use tools that match the user's exact intention
+3. Do NOT call tools unless the user explicitly asks for it. Creating a drawing (via `create_drawing`) is a separate action from exporting it (e.g., `export_to_json`). Do NOT chain or follow up one with the other unless the user clearly requests it.
+4. NEVER call a tool without all required parameters
+
+THOUGHT PROCESS: Before taking any action, clearly explain your thought process and why you're choosing a specific tool.
+"""
 
 
 @traceable
@@ -425,7 +531,10 @@ def assistant(state: GraphState):
     """Handles assistant logic and LLM interaction."""
     messages = state.get("messages", [])
     context = state.get("context", {})
-    tools_to_use = [tool for tool in valid_tools if tool.name in state.get("selected_tools", [])]
+
+    selected_tool_names = context.get("selected_tools", [])
+    tools_to_use = [tool for tool in valid_tools if tool.name in selected_tool_names]
+
     if not tools_to_use:
         logger.warning("🤷 No tools selected, using all tools")
         tools_to_use = valid_tools
@@ -435,62 +544,32 @@ def assistant(state: GraphState):
     formatted_system_msg = system_msg.format(tool_descriptions=formatted_tool_descriptions)
     new_messages = [SystemMessage(content=formatted_system_msg)] + messages
 
+    response = None  # ✅ Ensure response always exists
     try:
         logger.info(f"assistant: Invoking LLM with new_messages: {new_messages}")
-        response = llm_with_selected_tools.invoke(
-            new_messages,
-            config={"tool_choice": "auto"}  #  "auto"
-        )
+
+        if len(tools_to_use) == 1:
+            selected_tool_name = tools_to_use[0].name
+            logger.info(f"🛠️ Forcing tool call: {selected_tool_name}")
+            tool_choice_config = {"tool_choice": {"type": "function", "function": {"name": selected_tool_name}}}
+        else:
+            tool_choice_config = {"tool_choice": "auto"}
+
+        response = llm_with_selected_tools.invoke(new_messages, config=tool_choice_config)
+
         if not isinstance(response, AIMessage):
             response = AIMessage(content=str(response))
+
     except Exception as e:
         logger.error(f"Error invoking LLM: {e}", exc_info=True)
         response = AIMessage(content=f"LLM Error: {e}")
 
     if response and hasattr(response, "tool_calls") and response.tool_calls:
-        logger.info(f"🛠️ Tool Calls Detected: {response.tool_calls}")
-        logger.info(f"Response: {response}")
         return {"messages": [response], "context": context}
     elif response and hasattr(response, "content") and response.content:
-        logger.info(f"🧠 Assistant response: {response.content}")
         return {"messages": [response], "context": context}
     else:
-        logger.warning("⚠️ Empty response from LLM")
-        return {"messages": [AIMessage(content="No response from LLM. Returning to user.")]}
-
-
-
-def handle_tool_response(state: GraphState) -> GraphState:
-    """Handles responses from tool calls and updates state."""
-    messages = state["messages"]
-    last_message = messages[-1]
-
-    if not isinstance(last_message, ToolMessage):
-        raise ValueError(f"Expected ToolMessage, got {type(last_message)}")
-
-    tool_name = last_message.name
-    tool_output = last_message.content
-    context = state.get("context", {})
-
-    logger.info(f"Handling tool response from {tool_name}: {tool_output}")
-
-    # Update the context with the tool's output.  Assume tool returns a dict.
-    try:
-        tool_output_dict = json.loads(tool_output)
-        if isinstance(tool_output_dict, dict):
-            context.update(tool_output_dict)
-            state["context"] = context #update the context
-        else:
-            context["tool_response"] = tool_output
-            state["context"] = context
-    except json.JSONDecodeError:
-        context["tool_response"] = tool_output
-        state["context"] = context
-
-    # Add the ToolMessage to the message history.
-    updated_messages = messages + [last_message]
-    return {"messages": updated_messages, "context": context}
-
+        return {"messages": [AIMessage(content="No response from LLM. Returning to user.")], "context": context}
 
 
 def tools_condition(state: GraphState) -> str:
@@ -519,7 +598,6 @@ graph_builder = StateGraph(GraphState)
 graph_builder.add_node("select_tools", select_tools)
 graph_builder.add_node("assistant", assistant)
 graph_builder.add_node("tools", ContextAwareToolNode(tools=valid_tools))
-graph_builder.add_node("handle_tool_response", handle_tool_response)
 
 graph_builder.add_conditional_edges(
     "assistant",
@@ -531,16 +609,8 @@ graph_builder.add_conditional_edges(
 )
 
 graph_builder.add_edge("select_tools", "assistant")
-graph_builder.add_edge("tools", "handle_tool_response")
-graph_builder.add_conditional_edges(
-    "handle_tool_response",
-    tools_condition,
-    path_map={
-        "assistant": "assistant",
-        "__end__": END,
-    }
-)
 graph_builder.add_edge(START, "select_tools")
+
 compiled_graph = graph_builder.compile()
 
 async def run_cli_interaction():

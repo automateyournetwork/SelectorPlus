@@ -142,9 +142,6 @@ const SearchFilesArgsSchema = z.object({
   excludePatterns: z.array(z.string()).optional().default([])
 });
 
-const GetFileInfoArgsSchema = z.object({
-  path: z.string(),
-});
 
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -388,15 +385,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: zodToJsonSchema(ListDirectoryArgsSchema) as ToolInput,
       },
       {
-        name: "directory_tree",
-        description:
-            "Get a recursive tree view of files and directories as a JSON structure. " +
-            "Each entry includes 'name', 'type' (file/directory), and 'children' for directories. " +
-            "Files have no children array, while directories always have a children array (which may be empty). " +
-            "The output is formatted with 2-space indentation for readability. Only works within allowed directories.",
-        inputSchema: zodToJsonSchema(DirectoryTreeArgsSchema) as ToolInput,
-      },
-      {
         name: "move_file",
         description:
           "Move or rename files and directories. Can move files between directories " +
@@ -414,15 +402,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           "matching items. Great for finding files when you don't know their exact location. " +
           "Only searches within allowed directories.",
         inputSchema: zodToJsonSchema(SearchFilesArgsSchema) as ToolInput,
-      },
-      {
-        name: "get_file_info",
-        description:
-          "Retrieve detailed metadata about a file or directory. Returns comprehensive " +
-          "information including size, creation time, last modified time, permissions, " +
-          "and type. This tool is perfect for understanding file characteristics " +
-          "without reading the actual content. Only works within allowed directories.",
-        inputSchema: zodToJsonSchema(GetFileInfoArgsSchema) as ToolInput,
       },
     ],
   };
@@ -504,64 +483,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case "list_directory": {
-        const parsed = ListDirectoryArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for list_directory: ${parsed.error}`);
-        }
-        const validPath = await validatePath(parsed.data.path);
-        const entries = await fs.readdir(validPath, { withFileTypes: true });
-        const formatted = entries
-          .map((entry) => `${entry.isDirectory() ? "[DIR]" : "[FILE]"} ${entry.name}`)
-          .join("\n");
-        return {
-          content: [{ type: "text", text: formatted }],
-        };
-      }
-
-        case "directory_tree": {
-            const parsed = DirectoryTreeArgsSchema.safeParse(args);
-            if (!parsed.success) {
-                throw new Error(`Invalid arguments for directory_tree: ${parsed.error}`);
-            }
-
-            interface TreeEntry {
-                name: string;
-                type: 'file' | 'directory';
-                children?: TreeEntry[];
-            }
-
-            async function buildTree(currentPath: string): Promise<TreeEntry[]> {
-                const validPath = await validatePath(currentPath);
-                const entries = await fs.readdir(validPath, {withFileTypes: true});
-                const result: TreeEntry[] = [];
-
-                for (const entry of entries) {
-                    const entryData: TreeEntry = {
-                        name: entry.name,
-                        type: entry.isDirectory() ? 'directory' : 'file'
-                    };
-
-                    if (entry.isDirectory()) {
-                        const subPath = path.join(currentPath, entry.name);
-                        entryData.children = await buildTree(subPath);
-                    }
-
-                    result.push(entryData);
-                }
-
-                return result;
-            }
-
-            const treeData = await buildTree(parsed.data.path);
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify(treeData, null, 2)
-                }],
-            };
-        }
-
       case "move_file": {
         const parsed = MoveFileArgsSchema.safeParse(args);
         if (!parsed.success) {
@@ -584,20 +505,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const results = await searchFiles(validPath, parsed.data.pattern, parsed.data.excludePatterns);
         return {
           content: [{ type: "text", text: results.length > 0 ? results.join("\n") : "No matches found" }],
-        };
-      }
-
-      case "get_file_info": {
-        const parsed = GetFileInfoArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for get_file_info: ${parsed.error}`);
-        }
-        const validPath = await validatePath(parsed.data.path);
-        const info = await getFileStats(validPath);
-        return {
-          content: [{ type: "text", text: Object.entries(info)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join("\n") }],
         };
       }
 
