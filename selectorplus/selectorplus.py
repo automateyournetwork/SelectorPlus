@@ -587,6 +587,7 @@ graph_builder.add_conditional_edges(
     lambda state: state.get("__next__", "__end__"),
     path_map={
         "tools": "tools",
+        "select_tools": "select_tools",  # <- Add this line
         "__end__": END,
     }
 )
