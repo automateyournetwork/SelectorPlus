@@ -37,15 +37,9 @@ The server provides the following tools:
 #### Drawing Management
 
 - `create_drawing`: Create a new Excalidraw drawing
-- `get_drawing`: Get an Excalidraw drawing by ID
-- `update_drawing`: Update an Excalidraw drawing by ID
-- `delete_drawing`: Delete an Excalidraw drawing by ID
-- `list_drawings`: List all Excalidraw drawings
 
 #### Export Operations
 
-- `export_to_svg`: Export an Excalidraw drawing to SVG
-- `export_to_png`: Export an Excalidraw drawing to PNG
 - `export_to_json`: Export an Excalidraw drawing to JSON
 
 ## Development

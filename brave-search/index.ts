@@ -325,19 +325,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!isBraveWebSearchArgs(args)) {
           throw new Error("Invalid arguments for brave_web_search");
         }
-        const { query, count = 10 } = args;
+      
+        const query = args.query;
+        let count = args.count;
+      
+        // 🚨 Ensure count is valid (>= 1, <= 20), fallback to 10 if null or invalid
+        if (typeof count !== "number" || count < 1 || count > 20) {
+          count = 10;
+        }
+      
         const results = await performWebSearch(query, count);
         return {
           content: [{ type: "text", text: results }],
           isError: false,
         };
-      }
+      }      
 
       case "brave_local_search": {
         if (!isBraveLocalSearchArgs(args)) {
           throw new Error("Invalid arguments for brave_local_search");
         }
-        const { query, count = 5 } = args;
+        const query = args.query;
+        const count = args.count ?? 5;  // 👈 fallback if null or undefined
         const results = await performLocalSearch(query, count);
         return {
           content: [{ type: "text", text: results }],

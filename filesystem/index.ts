@@ -95,9 +95,51 @@ async function validatePath(requestedPath: string): Promise<string> {
 }
 
 // Schema definitions
+const ReadFileArgsSchema = z.object({
+  path: z.string(),
+});
+
+const ReadMultipleFilesArgsSchema = z.object({
+  paths: z.array(z.string()),
+});
+
 const WriteFileArgsSchema = z.object({
   path: z.string(),
   content: z.string(),
+});
+
+const EditOperation = z.object({
+  oldText: z.string().describe('Text to search for - must match exactly'),
+  newText: z.string().describe('Text to replace with')
+});
+
+const EditFileArgsSchema = z.object({
+  path: z.string(),
+  edits: z.array(EditOperation),
+  dryRun: z.boolean().default(false).describe('Preview changes using git-style diff format')
+});
+
+const CreateDirectoryArgsSchema = z.object({
+  path: z.string(),
+});
+
+const ListDirectoryArgsSchema = z.object({
+  path: z.string(),
+});
+
+const DirectoryTreeArgsSchema = z.object({
+  path: z.string(),
+});
+
+const MoveFileArgsSchema = z.object({
+  source: z.string(),
+  destination: z.string(),
+});
+
+const SearchFilesArgsSchema = z.object({
+  path: z.string(),
+  pattern: z.string(),
+  excludePatterns: z.array(z.string()).optional().default([])
 });
 
 
@@ -290,6 +332,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
+        name: "read_file",
+        description:
+          "Read the complete contents of a file from the file system. " +
+          "Handles various text encodings and provides detailed error messages " +
+          "if the file cannot be read. Use this tool when you need to examine " +
+          "the contents of a single file. Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(ReadFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "read_multiple_files",
+        description:
+          "Read the contents of multiple files simultaneously. This is more " +
+          "efficient than reading files one by one when you need to analyze " +
+          "or compare multiple files. Each file's content is returned with its " +
+          "path as a reference. Failed reads for individual files won't stop " +
+          "the entire operation. Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(ReadMultipleFilesArgsSchema) as ToolInput,
+      },
+      {
         name: "write_file",
         description:
           "Create a new file or completely overwrite an existing file with new content. " +
@@ -297,15 +358,95 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           "Handles text content with proper encoding. Only works within allowed directories.",
         inputSchema: zodToJsonSchema(WriteFileArgsSchema) as ToolInput,
       },
+      {
+        name: "edit_file",
+        description:
+          "Make line-based edits to a text file. Each edit replaces exact line sequences " +
+          "with new content. Returns a git-style diff showing the changes made. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(EditFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "create_directory",
+        description:
+          "Create a new directory or ensure a directory exists. Can create multiple " +
+          "nested directories in one operation. If the directory already exists, " +
+          "this operation will succeed silently. Perfect for setting up directory " +
+          "structures for projects or ensuring required paths exist. Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(CreateDirectoryArgsSchema) as ToolInput,
+      },
+      {
+        name: "list_directory",
+        description:
+          "Get a detailed listing of all files and directories in a specified path. " +
+          "Results clearly distinguish between files and directories with [FILE] and [DIR] " +
+          "prefixes. This tool is essential for understanding directory structure and " +
+          "finding specific files within a directory. Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(ListDirectoryArgsSchema) as ToolInput,
+      },
+      {
+        name: "move_file",
+        description:
+          "Move or rename files and directories. Can move files between directories " +
+          "and rename them in a single operation. If the destination exists, the " +
+          "operation will fail. Works across different directories and can be used " +
+          "for simple renaming within the same directory. Both source and destination must be within allowed directories.",
+        inputSchema: zodToJsonSchema(MoveFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "search_files",
+        description:
+          "Recursively search for files and directories matching a pattern. " +
+          "Searches through all subdirectories from the starting path. The search " +
+          "is case-insensitive and matches partial names. Returns full paths to all " +
+          "matching items. Great for finding files when you don't know their exact location. " +
+          "Only searches within allowed directories.",
+        inputSchema: zodToJsonSchema(SearchFilesArgsSchema) as ToolInput,
+      },
     ],
   };
 });
+
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     const { name, arguments: args } = request.params;
 
     switch (name) {
+      case "read_file": {
+        const parsed = ReadFileArgsSchema.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(`Invalid arguments for read_file: ${parsed.error}`);
+        }
+        const validPath = await validatePath(parsed.data.path);
+        const content = await fs.readFile(validPath, "utf-8");
+        return {
+          content: [{ type: "text", text: content }],
+        };
+      }
+
+      case "read_multiple_files": {
+        const parsed = ReadMultipleFilesArgsSchema.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(`Invalid arguments for read_multiple_files: ${parsed.error}`);
+        }
+        const results = await Promise.all(
+          parsed.data.paths.map(async (filePath: string) => {
+            try {
+              const validPath = await validatePath(filePath);
+              const content = await fs.readFile(validPath, "utf-8");
+              return `${filePath}:\n${content}\n`;
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              return `${filePath}: Error - ${errorMessage}`;
+            }
+          }),
+        );
+        return {
+          content: [{ type: "text", text: results.join("\n---\n") }],
+        };
+      }
+
       case "write_file": {
         const parsed = WriteFileArgsSchema.safeParse(args);
         if (!parsed.success) {
@@ -315,6 +456,55 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         await fs.writeFile(validPath, parsed.data.content, "utf-8");
         return {
           content: [{ type: "text", text: `Successfully wrote to ${parsed.data.path}` }],
+        };
+      }
+
+      case "edit_file": {
+        const parsed = EditFileArgsSchema.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(`Invalid arguments for edit_file: ${parsed.error}`);
+        }
+        const validPath = await validatePath(parsed.data.path);
+        const result = await applyFileEdits(validPath, parsed.data.edits, parsed.data.dryRun);
+        return {
+          content: [{ type: "text", text: result }],
+        };
+      }
+
+      case "create_directory": {
+        const parsed = CreateDirectoryArgsSchema.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(`Invalid arguments for create_directory: ${parsed.error}`);
+        }
+        const validPath = await validatePath(parsed.data.path);
+        await fs.mkdir(validPath, { recursive: true });
+        return {
+          content: [{ type: "text", text: `Successfully created directory ${parsed.data.path}` }],
+        };
+      }
+
+      case "move_file": {
+        const parsed = MoveFileArgsSchema.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(`Invalid arguments for move_file: ${parsed.error}`);
+        }
+        const validSourcePath = await validatePath(parsed.data.source);
+        const validDestPath = await validatePath(parsed.data.destination);
+        await fs.rename(validSourcePath, validDestPath);
+        return {
+          content: [{ type: "text", text: `Successfully moved ${parsed.data.source} to ${parsed.data.destination}` }],
+        };
+      }
+
+      case "search_files": {
+        const parsed = SearchFilesArgsSchema.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(`Invalid arguments for search_files: ${parsed.error}`);
+        }
+        const validPath = await validatePath(parsed.data.path);
+        const results = await searchFiles(validPath, parsed.data.pattern, parsed.data.excludePatterns);
+        return {
+          content: [{ type: "text", text: results.length > 0 ? results.join("\n") : "No matches found" }],
         };
       }
 
@@ -336,7 +526,6 @@ async function runServer() {
   await server.connect(transport);
   console.error("Secure MCP Filesystem Server running on stdio");
   console.error("Allowed directories:", allowedDirectories);
-  process.stdin.resume(); // ✅ Keeps the process alive to receive tool calls
 }
 
 runServer().catch((error) => {
