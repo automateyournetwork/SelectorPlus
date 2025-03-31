@@ -504,8 +504,8 @@ def select_tools(state: GraphState):
 
     # LLM prompt: choose best tool
     tool_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an intelligent tool selector. Based on the user request and the available tools, pick the name of the best matching tool ONLY. Do not explain. Just output the tool name."),
-        ("human", "User request:\n{query}\n\nAvailable tools:\n{tools}\n\nPick the BEST tool name:")
+        ("system", "You are an intelligent tool selector. Based on the user request and the available tools, output a comma-separated list of tool names that are best suited for the request. ONLY list tool names. No explanation."),
+        ("human", "User request:\n{query}\n\nAvailable tools:\n{tools}\n\nPick the BEST tool names:")
     ])
 
     tool_descriptions = "\n".join(f"- {name}: {desc}" for name, desc in tool_infos)
@@ -514,14 +514,14 @@ def select_tools(state: GraphState):
 
     try:
         tool_selection_response = llm.invoke(selection_prompt)
-        selected_tool_name = tool_selection_response.content.strip().split()[0]  # be strict
-        logger.info(f"🔍 LLM selected tool: {selected_tool_name}")
+        selected_tool_names = [name.strip() for name in tool_selection_response.content.strip().split(",")]
+        logger.info(f"🔍 LLM selected tool: {selected_tool_names}")
     except Exception as e:
         logger.error(f"⚠️ Tool selection LLM failed: {e}")
-        selected_tool_name = None
+        selected_tool_names = None
 
-    if selected_tool_name:
-        context["selected_tools"] = [selected_tool_name]
+    if selected_tool_names:
+        context["selected_tools"] = selected_tool_names
     else:
         context["selected_tools"] = [t[0] for t in tool_infos]  # fallback to vector results
 
@@ -634,6 +634,15 @@ graph_builder.add_conditional_edges(
         "tools": "tools",
         "select_tools": "select_tools",
         "__end__": END,
+    }
+)
+
+graph_builder.add_conditional_edges(
+    "handle_tool_results",
+    lambda state: "select_tools" if state["context"].get("reselect", False) else "assistant",
+    {
+        "select_tools": "select_tools",
+        "assistant": "assistant"
     }
 )
 
