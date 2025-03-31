@@ -65,7 +65,7 @@ Here are the MCP Servers attached to Selector Plus:
 )
 st.markdown("---")
 # Keep layout the same as the upload page
-st.header("Chat with Packet Copilot")
+st.header("Chat with Selector Plus")
 
 # Display chat history
 for msg in st.session_state["messages"]:
