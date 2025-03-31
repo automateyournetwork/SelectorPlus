@@ -66,6 +66,12 @@ docker build -t streamlit-app ./streamlit
 if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
 echo "streamlit-app image built successfully."
 
+echo "Building netbox-app image..."
+docker build -t netbox-mcp ./netbox
+if [ $? -ne 0 ]; then echo "Error building netbox-mcp image."; exit 1; fi
+echo "netbox-mcp image built successfully."
+
+
 #######
 #     #
 # RUN #
@@ -105,6 +111,10 @@ docker run -dit \
 echo "Starting brave-search-mcp container..."
 docker run -dit --name brave-search-mcp -e BRAVE_API_KEY="${BRAVE_API_KEY}" brave-search-mcp
 echo "brave-search-mcp container started."
+
+echo "Starting netbox-mcp container..."
+docker run -d --name netbox-mcp -e NETBOX_URL="${NETBOX_URL:-YOUR_SELECTOR_URL}" -e NETBOX_TOKEN="${NETBOX_TOKEN:-NETBOX_TOKEN}" netbox-mcp python3 server.py --restart unless-stopped
+echo "netbox-mcp container started."
 
 # Wait for MCP containers to start (with a check)
 echo "Waiting for MCP containers to start..."
