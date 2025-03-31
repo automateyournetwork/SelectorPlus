@@ -22,7 +22,9 @@ export const CreateOrUpdateFileSchema = z.object({
   content: z.string().describe("Content of the file"),
   message: z.string().describe("Commit message"),
   branch: z.string().describe("Branch to create/update the file in"),
-  sha: z.string().optional().describe("SHA of the file being replaced (required when updating existing files)"),
+  sha: z.string().nullable().optional().refine((val) => val !== null, {
+    message: "sha must be a string or undefined, not null",
+  }),
 });
 
 export const GetFileContentsSchema = z.object({
@@ -91,6 +93,16 @@ export async function getFileContents(
   return data;
 }
 
+function removeNullValues(obj: any): any {
+  const newObj: any = {};
+  for (const key in obj) {
+    if (obj[key] !== null) {
+      newObj[key] = obj[key];
+    }
+  }
+  return newObj;
+}
+
 export async function createOrUpdateFile(
   owner: string,
   repo: string,
@@ -102,29 +114,35 @@ export async function createOrUpdateFile(
 ) {
   const encodedContent = Buffer.from(content).toString("base64");
 
-  let currentSha = sha;
-  if (!currentSha) {
+  let url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  if (branch) {
+    url += `?ref=${branch}`;
+  }
+
+  let body: any = {
+    message,
+    content: encodedContent,
+    branch,
+  };
+
+  if (sha) {
+    body.sha = sha; // Only add sha if it's provided
+  } else {
     try {
       const existingFile = await getFileContents(owner, repo, path, branch);
       if (!Array.isArray(existingFile)) {
-        currentSha = existingFile.sha;
+        body.sha = existingFile.sha;
       }
     } catch (error) {
       console.error("Note: File does not exist in branch, will create new file");
     }
+
+    if (!body.sha) {
+      delete body.sha; // Ensure sha is not sent if file does not exist.
+    }
   }
 
-  let url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
-  if (branch) {
-    url += `?ref=${branch}`; // Add branch query parameter here
-  }
-
-  const body = {
-    message,
-    content: encodedContent,
-    branch,
-    ...(currentSha ? { sha: currentSha } : {}),
-  };
+  body = removeNullValues(body); // Remove null values from the body object
 
   console.log("GitHub API URL:", url);
   console.log("GitHub API Body:", JSON.stringify(body));
