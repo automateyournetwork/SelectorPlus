@@ -44,11 +44,6 @@ docker build -t excalidraw-mcp ./excalidraw
 if [ $? -ne 0 ]; then echo "Error building excalidraw-mcp image."; exit 1; fi
 echo "excalidraw-mcp image built successfully."
 
-echo "Building brave-search-mcp image..."
-docker build -t brave-search-mcp ./brave-search
-if [ $? -ne 0 ]; then echo "Error building brave-search-mcp image."; exit 1; fi
-echo "brave-search-mcp image built successfully."
-
 #Filesystem
 echo "Building filesystem-mcp image..."
 docker build -t filesystem-mcp ./filesystem
@@ -71,6 +66,13 @@ docker build -t netbox-mcp ./netbox
 if [ $? -ne 0 ]; then echo "Error building netbox-mcp image."; exit 1; fi
 echo "netbox-mcp image built successfully."
 
+echo "Building google-search-app image..."
+docker build -t google-search-mcp ./google_search 2>&1 | tee docker_build.log
+if [ $? -ne 0 ]; then
+    echo "Error building google-search-mcp image. See docker_build.log for details."
+    exit 1
+fi
+echo "google-search-mcp image built successfully."
 
 #######
 #     #
@@ -78,7 +80,6 @@ echo "netbox-mcp image built successfully."
 #     #
 #######
 
-# Use environment variables in docker run commands
 echo "Starting github-mcp container..."
 docker run -dit --name github-mcp -e GITHUB_TOKEN="${GITHUB_TOKEN:-YOUR_GITHUB_TOKEN}" github-mcp
 echo "github-mcp container started."
@@ -108,10 +109,6 @@ docker run -dit \
   -v "/Users/johncapobianco/SelectorPlusOutput:/projects" \
   filesystem-mcp
 
-echo "Starting brave-search-mcp container..."
-docker run -dit --name brave-search-mcp -e BRAVE_API_KEY="${BRAVE_API_KEY}" brave-search-mcp
-echo "brave-search-mcp container started."
-
 echo "Starting netbox-mcp container..."
 docker run -d --name netbox-mcp -e NETBOX_URL="${NETBOX_URL:-YOUR_SELECTOR_URL}" -e NETBOX_TOKEN="${NETBOX_TOKEN:-NETBOX_TOKEN}" netbox-mcp python3 server.py --restart unless-stopped
 echo "netbox-mcp container started."
@@ -125,6 +122,10 @@ if ! docker ps | grep -q "github-mcp"; then
     echo "github-mcp container not found."
     exit 1
 fi
+
+echo "Starting google-search-mcp container..."
+docker run -dit --name google-search-mcp google-search-mcp
+echo "google-search-mcp container started."
 
 # Start langgraph container
 echo "Starting langgraph-selectorplus container..."
