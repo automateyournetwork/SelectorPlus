@@ -346,8 +346,8 @@ async def load_all_tools():
         ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
-        ("brave-search-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
         ("netbox-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("google-search-mcp", ["node", "/app/build/index.js"], "tools/list", "tools/call"),
     ]
 
     try:

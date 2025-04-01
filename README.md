@@ -33,7 +33,9 @@ SLACK_TEAM_ID=""
 SELECTOR_AI_API_KEY=
 SELECTOR_URL=
 FILESYSTEM_PATH=
-BRAVE_API_KEY=
+NETBOX_URL=
+NETBOX_TOKEN=
+
 ```
  Important: Keep your .env file secure, as it contains sensitive API keys. Do not commit it to version control.
 

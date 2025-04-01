@@ -1,0 +1,131 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.73kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node:22-bookworm-slim
+#2 DONE 0.2s
+
+#3 [internal] load metadata for docker.io/library/debian:bookworm-slim
+#3 DONE 0.2s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [app_release  1/11] FROM docker.io/library/debian:bookworm-slim@sha256:1209d8fd77def86ceb6663deef7956481cc6c14a25e1e64daec12c0ceffcc19d
+#5 DONE 0.0s
+
+#6 [node_builder 1/8] FROM docker.io/library/node:22-bookworm-slim@sha256:bac8ff0b5302b06924a5e288fb4ceecef9c8bb0bb92515985d2efdc3a2447052
+#6 DONE 0.0s
+
+#7 [app_release  2/11] RUN apt-get update && apt-get install -y         ca-certificates         libx11-6         libxcomposite1         libxcursor1         libxdamage1         libxext6         libxfixes3         libxi6         libxrandr2         libxrender1         libxtst6         fonts-freefont-ttf         libnss3         libasound2         libatk-bridge2.0-0         libgtk-3-0         chromium         udev         libpng16-16         curl
+#7 CACHED
+
+#8 [app_release  3/11] RUN curl -sL https://deb.nodesource.com/setup_22.x | bash - &&         apt-get install -y nodejs
+#8 CACHED
+
+#9 [internal] load build context
+#9 transferring context: 1.07kB done
+#9 DONE 0.0s
+
+#10 [node_builder 6/8] COPY tsconfig.json ./
+#10 CACHED
+
+#11 [node_builder 4/8] COPY package-lock.json ./
+#11 CACHED
+
+#12 [node_builder 2/8] WORKDIR /app
+#12 CACHED
+
+#13 [node_builder 7/8] COPY src ./src
+#13 CACHED
+
+#14 [node_builder 3/8] COPY package*.json ./
+#14 CACHED
+
+#15 [node_builder 5/8] RUN --mount=type=cache,target=/root/.npm npm ci
+#15 CACHED
+
+#16 [node_builder 8/8] RUN npm run build
+#16 CACHED
+
+#17 [app_release  4/11] RUN echo "PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/app/node_modules/.bin"
+#17 0.113 PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/app/node_modules/.bin
+#17 DONE 0.1s
+
+#18 [app_release  5/11] RUN which node
+#18 0.135 /usr/bin/node
+#18 DONE 0.1s
+
+#19 [app_release  6/11] RUN which npm
+#19 0.146 /usr/bin/npm
+#19 DONE 0.1s
+
+#20 [app_release  7/11] WORKDIR /app
+#20 DONE 0.0s
+
+#21 [app_release  8/11] COPY --from=node_builder /app/build ./build
+#21 DONE 0.0s
+
+#22 [app_release  9/11] COPY --from=node_builder /app/package*.json ./
+#22 DONE 0.0s
+
+#23 [app_release 10/11] COPY --from=node_builder /app/node_modules ./node_modules
+#23 DONE 0.2s
+
+#24 [app_release 11/11] RUN npx playwright install chromium
+#24 0.545 Downloading Chromium 134.0.6998.35 (playwright build v1161) from https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1161/chromium-linux-arm64.zip
+#24 0.931 |                                                                                |   0% of 167.8 MiB
+#24 1.527 |■■■■■■■■                                                                        |  10% of 167.8 MiB
+#24 2.009 |■■■■■■■■■■■■■■■■                                                                |  20% of 167.8 MiB
+#24 2.573 |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 167.8 MiB
+#24 3.086 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 167.8 MiB
+#24 3.494 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 167.8 MiB
+#24 3.728 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 167.8 MiB
+#24 4.080 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 167.8 MiB
+#24 4.560 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 167.8 MiB
+#24 5.071 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 167.8 MiB
+#24 5.614 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 167.8 MiB
+#24 8.277 Chromium 134.0.6998.35 (playwright build v1161) downloaded to /app/node_modules/playwright-core/.local-browsers/chromium-1161
+#24 8.277 Downloading FFMPEG playwright build v1011 from https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux-arm64.zip
+#24 8.453 |                                                                                |   0% of 1.6 MiB
+#24 8.564 |■■■■■■■■                                                                        |  10% of 1.6 MiB
+#24 8.578 |■■■■■■■■■■■■■■■■                                                                |  20% of 1.6 MiB
+#24 8.592 |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 1.6 MiB
+#24 8.601 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 1.6 MiB
+#24 8.607 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 1.6 MiB
+#24 8.611 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 1.6 MiB
+#24 8.613 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 1.6 MiB
+#24 8.616 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 1.6 MiB
+#24 8.619 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 1.6 MiB
+#24 8.622 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 1.6 MiB
+#24 8.666 FFMPEG playwright build v1011 downloaded to /app/node_modules/playwright-core/.local-browsers/ffmpeg-1011
+#24 8.666 Downloading Chromium Headless Shell 134.0.6998.35 (playwright build v1161) from https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1161/chromium-headless-shell-linux-arm64.zip
+#24 8.840 |                                                                                |   0% of 102.1 MiB
+#24 9.116 |■■■■■■■■                                                                        |  10% of 102.1 MiB
+#24 9.263 |■■■■■■■■■■■■■■■■                                                                |  20% of 102.1 MiB
+#24 9.371 |■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 102.1 MiB
+#24 9.676 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 102.1 MiB
+#24 9.822 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 102.1 MiB
+#24 10.15 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 102.1 MiB
+#24 10.31 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 102.1 MiB
+#24 10.72 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 102.1 MiB
+#24 10.95 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 102.1 MiB
+#24 11.37 |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 102.1 MiB
+#24 12.86 Chromium Headless Shell 134.0.6998.35 (playwright build v1161) downloaded to /app/node_modules/playwright-core/.local-browsers/chromium_headless_shell-1161
+#24 12.91 npm notice
+#24 12.91 npm notice New major version of npm available! 10.9.2 -> 11.2.0
+#24 12.91 npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.2.0
+#24 12.91 npm notice To update run: npm install -g npm@11.2.0
+#24 12.91 npm notice
+#24 DONE 13.3s
+
+#25 exporting to image
+#25 exporting layers
+#25 exporting layers 1.0s done
+#25 writing image sha256:f474691d9539166d5d4eb8121b75bc09a03e1e738a206f756ad9ca001ab1f3de done
+#25 naming to docker.io/library/google-search-mcp
+#25 naming to docker.io/library/google-search-mcp done
+#25 DONE 1.0s
