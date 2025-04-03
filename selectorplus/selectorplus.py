@@ -348,6 +348,7 @@ async def load_all_tools():
         ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
         ("netbox-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
         ("google-search-mcp", ["node", "/app/build/index.js"], "tools/list", "tools/call"),
+        ("servicenow-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
     ]
 
     try:

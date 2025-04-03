@@ -50,29 +50,31 @@ docker build -t filesystem-mcp ./filesystem
 if [ $? -ne 0 ]; then echo "Error building filesystem-mcp image."; exit 1; fi
 echo "filesystem-mcp image built successfully."
 
-# Build langgraph container
-echo "Building langgraph container..."
-docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorplus
-if [ $? -ne 0 ]; then echo "Error building langgraph-selectorplus image."; exit 1; fi
-echo "langgraph-selectorplus image built successfully."
-
 echo "Building streamlit-app image..."
 docker build -t streamlit-app ./streamlit
 if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
 echo "streamlit-app image built successfully."
 
-echo "Building netbox-app image..."
+echo "Building netbox-mcp image..."
 docker build -t netbox-mcp ./netbox
 if [ $? -ne 0 ]; then echo "Error building netbox-mcp image."; exit 1; fi
 echo "netbox-mcp image built successfully."
 
-echo "Building google-search-app image..."
-docker build -t google-search-mcp ./google_search 2>&1 | tee docker_build.log
-if [ $? -ne 0 ]; then
-    echo "Error building google-search-mcp image. See docker_build.log for details."
-    exit 1
-fi
+echo "Building google-search-mcp image..."
+docker build -t google-search-mcp ./google_search
+if [ $? -ne 0 ]; then echo "Error building google-search-mcp image."; exit 1; fi
 echo "google-search-mcp image built successfully."
+
+echo "Building sericenow-mcp image..."
+docker build -t servicenow-mcp ./servicenow
+if [ $? -ne 0 ]; then echo "Error building servicenow-mcp image."; exit 1; fi
+echo "servicenow-mcp image built successfully."
+
+# Build langgraph container
+echo "Building langgraph container..."
+docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorplus
+if [ $? -ne 0 ]; then echo "Error building langgraph-selectorplus image."; exit 1; fi
+echo "langgraph-selectorplus image built successfully."
 
 #######
 #     #
@@ -113,19 +115,23 @@ echo "Starting netbox-mcp container..."
 docker run -d --name netbox-mcp -e NETBOX_URL="${NETBOX_URL:-YOUR_SELECTOR_URL}" -e NETBOX_TOKEN="${NETBOX_TOKEN:-NETBOX_TOKEN}" netbox-mcp python3 server.py --restart unless-stopped
 echo "netbox-mcp container started."
 
-# Wait for MCP containers to start (with a check)
-echo "Waiting for MCP containers to start..."
-sleep 5 # Initial wait
+#Start Google Search MCP 
+echo "Starting google-search-mcp container..."
+docker run -dit --name google-search-mcp google-search-mcp
+echo "google-search-mcp container started."
 
-# Check if MCP containers are running
+echo "Starting service now-mcp container..."
+docker run -d --name servicenow-mcp \
+ --env-file .env \
+ servicenow-mcp python3 server.py --restart unless-stopped
+
+echo "selector-mcp container started."
+
+# # Check if MCP containers are running
 if ! docker ps | grep -q "github-mcp"; then
     echo "github-mcp container not found."
     exit 1
 fi
-
-echo "Starting google-search-mcp container..."
-docker run -dit --name google-search-mcp google-search-mcp
-echo "google-search-mcp container started."
 
 # Start langgraph container
 echo "Starting langgraph-selectorplus container..."
@@ -135,7 +141,7 @@ docker run -p 2024:2024 -dit \
     langgraph-selectorplus
 echo "langgraph-selectorplus container started."
 
-# Start Streamlit front end
+Start Streamlit front end
 echo "Starting streamlit-app container..."
 docker run -d --name streamlit-app -p 8501:8501 streamlit-app
 echo "streamlit-app container started at http://localhost:8501"
