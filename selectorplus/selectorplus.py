@@ -11,19 +11,16 @@ from langsmith import traceable
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 from langchain_core.documents import Document
-from langchain_core.messages import ToolMessage
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain.tools import Tool, StructuredTool
 from langgraph.graph.message import add_messages
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.vectorstores import InMemoryVectorStore
 from typing import Dict, Any, List, Optional, Union, Annotated
 from langgraph.graph import StateGraph, START, END
-from langgraph.prebuilt.tool_node import tools_condition, ToolNode
-from langgraph.pregel.retry import RetryPolicy
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langgraph.prebuilt.tool_node import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-
+from langchain_core.runnables import RunnableConfig
 
 load_dotenv()
 
@@ -33,7 +30,6 @@ logger = logging.getLogger(__name__)
 class GraphState(TypedDict):
     """State class for LangGraph."""
     messages: Annotated[list[BaseMessage], add_messages]
-    # selected_tools: list[str]  # Removed selected_tools
     context: dict
     file_path: Optional[str]  # To store the file path
 
@@ -139,8 +135,8 @@ class MCPToolDiscovery:
         self.discovered_tools = []
 
     async def discover_tools(self) -> List[Dict[str, Any]]:
-        """Discovers tools from the MCP container."""
-        print(f"🔍 Discovering tools from container: {self.container_name}")
+        """Discovers tools from the MCP container asynchronously."""
+        print(f"🔍 Async Discovering tools from container: {self.container_name}")
         print(f"🕵️ Discovery Method: {self.discovery_method}")
 
         try:
@@ -150,76 +146,97 @@ class MCPToolDiscovery:
                 "params": {},
                 "id": "1"
             }
-            print(f"Sending discovery payload: {discovery_payload}")
-            command = ["docker", "exec", "-i", self.container_name] + self.command
-            process = subprocess.run(
-                command,
-                input=json.dumps(discovery_payload) + "\n",
-                capture_output=True,
-                text=True,
+            payload_bytes = (json.dumps(discovery_payload) + "\n").encode('utf-8')
+            print(f"Sending async discovery payload: {payload_bytes.decode('utf-8').strip()}")
+
+            command_list = ["docker", "exec", "-i", self.container_name] + self.command
+
+            # --- Use asyncio.create_subprocess_exec ---
+            process = await asyncio.create_subprocess_exec(
+                *command_list,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
-            stdout_lines = process.stdout.strip().split("\n")
-            print("📥 Raw discovery response:", stdout_lines)
+            stdout, stderr = await process.communicate(input=payload_bytes)
+            # --- End asyncio subprocess usage ---
+
+            stdout_str = stdout.decode('utf-8').strip() if stdout else ""
+            stderr_str = stderr.decode('utf-8').strip() if stderr else ""
+
+            print(f"📥 Async Raw discovery stdout:\n{stdout_str}")
+            if stderr_str:
+                 print(f"📥 Async Raw discovery stderr:\n{stderr_str}")
+
+            if process.returncode != 0:
+                 print(f"❌ Async Discovery subprocess failed with code {process.returncode}")
+                 return []
+
+            # Process output lines
+            stdout_lines = stdout_str.strip().split("\n")
             if stdout_lines:
                 last_line = None
                 for line in reversed(stdout_lines):
-                    if line.startswith("{") or line.startswith("["):
-                        last_line = line
-                        break
+                    # More robust check for start of JSON object or array
+                    trimmed_line = line.strip()
+                    if trimmed_line.startswith("{") and trimmed_line.endswith("}"):
+                         last_line = trimmed_line
+                         break
+                    if trimmed_line.startswith("[") and trimmed_line.endswith("]"):
+                         last_line = trimmed_line
+                         break
                 if last_line:
                     try:
                         response = json.loads(last_line)
-                        if "result" in response:
-                            if isinstance(response["result"], list):
-                                tools = response["result"]
-                            elif isinstance(response["result"], dict) and "tools" in response["result"]:
-                                tools = response["result"]["tools"]
-                            else:
-                                print("❌ Unexpected 'result' structure.")
-                                return []
+                        # Standardize tool extraction slightly
+                        tools_list = []
+                        if isinstance(response.get("result"), list):
+                             tools_list = response["result"]
+                        elif isinstance(response.get("result"), dict) and "tools" in response["result"]:
+                             tools_list = response["result"]["tools"]
+
+                        if tools_list:
+                            # Ensure names exist before logging
+                            tool_names = [t.get("name", "Unnamed") for t in tools_list if isinstance(t, dict)]
+                            print(f"✅ Async Discovered tools: {tool_names}")
+                            return tools_list # Return the list of tool dicts
                         else:
-                            tools = []
-                        if tools:
-                            print("✅ Discovered tools:", [tool["name"] for tool in tools])
-                            return tools
-                        else:
-                            print("❌ No tools found in response.")
+                            print("❌ No tools found in JSON response.")
                             return []
                     except json.JSONDecodeError as e:
-                        print(f"❌ JSON Decode Error: {e}")
+                        print(f"❌ JSON Decode Error in discovery: {e} on line: {last_line}")
                         return []
                 else:
-                    print("❌ No valid JSON response found.")
+                    print("❌ No valid JSON line found in discovery output.")
                     return []
             else:
-                print("❌ No response lines received.")
+                print("❌ No stdout lines received from discovery.")
                 return []
         except Exception as e:
-            print(f"❌ Error discovering tools: {e}")
+            print(f"❌ Error during async tool discovery: {e}", exc_info=True)
             return []
 
     @traceable
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
-        """Calls a tool in the MCP container with logging and error handling."""
-        logger.info(f"🔍 Attempting to call tool: {tool_name}")
+        """Calls a tool in the MCP container asynchronously."""
+        logger.info(f"🔍 Attempting Async call tool: {tool_name}")
         logger.info(f"📦 Arguments: {arguments}")
 
-        try:
-            network_inspect = subprocess.run(
-                ["docker", "network", "inspect", "bridge"],
-                capture_output=True,
-                text=True,
-            )
-            logger.info(f"🌐 Network Details: {network_inspect.stdout}")
-        except Exception as e:
-            logger.error(f"❌ Network inspection failed: {e}")
+        # Note: Network inspection via subprocess.run is also blocking!
+        # If needed, run this separately or make it async too. For now, let's comment it out
+        # try:
+        #     network_inspect = subprocess.run(...) # THIS IS BLOCKING
+        #     logger.info(f"🌐 Network Details: {network_inspect.stdout}")
+        # except Exception as e:
+        #     logger.error(f"❌ Network inspection failed: {e}")
 
-        command = ["docker", "exec", "-i", self.container_name] + self.command
+        command_list = ["docker", "exec", "-i", self.container_name] + self.command
 
         try:
-            normalized_args = arguments
+            normalized_args = arguments.copy() # Avoid modifying original dict
 
-            if tool_name == "create_or_update_file" and isinstance(normalized_args, dict) and "sha" in normalized_args and normalized_args["sha"] is None:
+            # Handle specific cases if necessary (like the 'sha' key)
+            if tool_name == "create_or_update_file" and "sha" in normalized_args and normalized_args["sha"] is None:
                 del normalized_args["sha"]
 
             payload = {
@@ -228,52 +245,63 @@ class MCPToolDiscovery:
                 "params": {"name": tool_name, "arguments": normalized_args},
                 "id": "2",
             }
+            payload_bytes = (json.dumps(payload) + "\n").encode('utf-8') # Encode payload
 
-            logger.info(f"🚀 Full Payload: {json.dumps(payload)}")
+            logger.info(f"🚀 Async Payload: {payload_bytes.decode('utf-8').strip()}")
 
-            process = subprocess.run(
-                command,
-                input=json.dumps(payload) + "\n",
-                capture_output=True,
-                text=True,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"}
+            # --- Use asyncio.create_subprocess_exec ---
+            process = await asyncio.create_subprocess_exec(
+                *command_list,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"} # Ensure env is passed if needed
             )
 
-            logger.info(f"🔬 Subprocess Exit Code: {process.returncode}")
-            logger.info(f"🔬 Full subprocess stdout: {process.stdout}")
-            logger.info(f"🔬 Full subprocess stderr: {process.stderr}")
+            # Send payload and receive output without blocking
+            stdout, stderr = await process.communicate(input=payload_bytes)
+            # --- End asyncio subprocess usage ---
+
+
+            stdout_str = stdout.decode('utf-8').strip() if stdout else ""
+            stderr_str = stderr.decode('utf-8').strip() if stderr else ""
+
+            logger.info(f"🔬 Async Subprocess Exit Code: {process.returncode}")
+            logger.info(f"🔬 Async Full subprocess stdout:\n{stdout_str}")
+            logger.info(f"🔬 Async Full subprocess stderr:\n{stderr_str}")
 
             if process.returncode != 0:
-                logger.error(f"❌ Subprocess returned non-zero exit code: {process.returncode}")
-                logger.error(f"🚨 Error Details: {process.stderr}")
-                return f"Subprocess Error: {process.stderr}"
+                logger.error(f"❌ Async Subprocess returned non-zero exit code: {process.returncode}")
+                logger.error(f"🚨 Async Error Details: {stderr_str}")
+                # Maybe return more specific error based on stderr?
+                return f"Subprocess Error (Exit Code {process.returncode}): {stderr_str or 'No stderr'}"
 
-            output_lines = process.stdout.strip().split("\n")
+            # Process output lines (similar to before, but now on decoded strings)
+            output_lines = stdout_str.strip().split("\n")
             for line in reversed(output_lines):
                 try:
                     response = json.loads(line)
                     logger.info(f"✅ Parsed JSON response: {response}")
-
                     if "result" in response:
                         return response["result"]
                     elif "error" in response:
+                        # Handle potential errors reported by the tool service
                         error_message = response["error"]
-                        if "tool not found" in str(error_message).lower():
-                            logger.error(f"🚨 Tool '{tool_name}' not found by service.")
-                            return f"Tool Error: Tool '{error_message}"
-                    else:
-                        logger.warning("⚠️ Unexpected response structure")
-                        return response
+                        logger.error(f"🚨 Tool service reported error: {error_message}")
+                        return f"Tool Error: {error_message}" # Return the error message from the tool
+
                 except json.JSONDecodeError:
+                    # Ignore lines that aren't valid JSON
+                    logger.debug(f"Ignoring non-JSON line: {line}")
                     continue
 
-            logger.error("❌ No valid JSON response found")
-            return "Error: No valid JSON response"
+            logger.error("❌ No valid JSON response found in stdout.")
+            return "Error: No valid JSON response found in tool output."
 
-        except Exception:
-            logger.critical(f"🔥 Critical tool call error", exc_info=True)
-            return "Critical Error: tool call failure"
-
+        except Exception as e:
+            # Catch potential exceptions during subprocess creation or communication
+            logger.critical(f"🔥 Critical async tool call error for {tool_name}", exc_info=True)
+            return f"Critical Error during tool call: {str(e)}"
 
 async def get_tools_for_service(service_name, command, discovery_method, call_method, service_discoveries):
     """Enhanced tool discovery for each service."""
@@ -288,48 +316,92 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
 
     tools = []
     try:
-        discovered_tools = await discovery.discover_tools()
-        print(f"🛠️ Tools for {service_name}: {[t['name'] for t in discovered_tools]}")
+        # Make sure discovery actually returns something
+        discovered_tools_list = await discovery.discover_tools()
+        if not discovered_tools_list: # Handle case where discovery fails or returns empty
+             print(f"⚠️ No tools discovered for {service_name}")
+             return []
 
-        for tool in discovered_tools:
-            tool_name = tool["name"]
-            tool_description = tool.get("description", "")
-            tool_schema = tool.get("inputSchema") or tool.get("parameters", {})
+        # Use .get() for safer access to tool names in the log message
+        print(f"🛠️ Tools for {service_name}: {[t.get('name', 'Unnamed') for t in discovered_tools_list]}")
+
+        for tool_info in discovered_tools_list: # Use a different variable name 'tool_info'
+            tool_name = tool_info.get("name")
+            if not tool_name:
+                logger.warning(f"⚠️ Skipping tool with no name for service {service_name}: {tool_info}")
+                continue
+
+            tool_description = tool_info.get("description", f"Tool {tool_name} from {service_name}") # Default desc
+            tool_schema = tool_info.get("inputSchema") or tool_info.get("parameters", {})
+
+            # --- Define the core async logic ---
+            # Capture tool_name's value for this specific iteration
+            current_tool_name = tool_name
+            async def _base_coroutine(**kwargs):
+                # Use current_tool_name captured from the loop iteration
+                logger.debug(f"Executing _base_coroutine for {current_tool_name} with {kwargs}")
+                return await service_discoveries[service_name].call_tool(current_tool_name, kwargs)
+
+            # --- Define a placeholder sync function ---
+            def _dummy_sync_func(*args, **kwargs):
+                 # Use current_tool_name captured from the loop iteration
+                logger.warning(f"Attempted sync call to async-only tool: {current_tool_name}")
+                raise NotImplementedError(f"Tool '{current_tool_name}' from {service_name} can only be called asynchronously.")
+
 
             if tool_schema and tool_schema.get("type") == "object":
+                # --- StructuredTool Path ---
                 try:
                     input_model = schema_to_pydantic_model(tool_name + "_Input", tool_schema)
 
-                    async def tool_call_wrapper(**kwargs):
-                        validated_args = input_model(**kwargs).dict()
-                        return await service_discoveries[service_name].call_tool(tool_name, validated_args)
+                    # Wrapper to validate args before calling base coroutine
+                    async def _structured_coroutine(**kwargs):
+                         # Validate and clean args using Pydantic model
+                         # exclude_unset=True avoids passing None for optional fields if not provided
+                         validated_args = input_model(**kwargs).dict(exclude_unset=True)
+                         logger.debug(f"Executing _structured_coroutine for {current_tool_name} with validated {validated_args}")
+                         # Use current_tool_name captured from the loop iteration
+                         return await service_discoveries[service_name].call_tool(current_tool_name, validated_args)
 
-                    structured_tool = StructuredTool.from_function(
+                    structured_tool = StructuredTool( # Use base constructor
                         name=tool_name,
                         description=tool_description,
                         args_schema=input_model,
-                        func=(lambda tool_name=tool_name, input_model=input_model:
-                            lambda **kwargs: asyncio.run(
-                                service_discoveries[service_name].call_tool(tool_name, input_model(**kwargs).dict())
-                            ))()
+                        func=_dummy_sync_func,       # Sync placeholder
+                        coroutine=_structured_coroutine # Explicit async implementation
                     )
-
                     tools.append(structured_tool)
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to build structured tool {tool_name}: {e}")
-            else:
-                async def fallback_tool_call_wrapper(x):
-                    return await service_discoveries[service_name].call_tool(tool_name, {"__arg1": x})
+                    logger.debug(f"✅ Added StructuredTool: {tool_name}")
 
-                fallback_tool = Tool(
+                except Exception as e:
+                    # Log the specific error during Pydantic/StructuredTool creation
+                    logger.warning(f"⚠️ Failed to build structured tool {tool_name}: {e}. Adding as simple tool.")
+                    # Fallback to simple tool if schema parsing or model creation fails
+                    simple_tool = Tool(
+                        name=tool_name,
+                        description=tool_description,
+                        func=_dummy_sync_func,     # Sync placeholder
+                        coroutine=_base_coroutine   # Basic async call without Pydantic validation
+                    )
+                    tools.append(simple_tool)
+                    logger.debug(f"✅ Added Simple Tool (fallback): {tool_name}")
+
+
+            else:
+                 # --- Simple Tool Path (No args or non-object schema) ---
+                simple_tool = Tool(
                     name=tool_name,
                     description=tool_description,
-                    func=lambda x: asyncio.run(fallback_tool_call_wrapper(x))
+                    func=_dummy_sync_func,     # Sync placeholder
+                    coroutine=_base_coroutine   # Use the base async wrapper directly
                 )
-                tools.append(fallback_tool)
+                tools.append(simple_tool)
+                logger.debug(f"✅ Added Simple Tool: {tool_name}")
+
 
     except Exception as e:
-        logger.error(f"❌ Tool discovery error in {service_name}: {e}", exc_info=True)
+        # Log any error during the overall discovery/processing for the service
+        logger.error(f"❌ Tool discovery/processing error in {service_name}: {e}", exc_info=True)
 
     return tools
 
@@ -349,6 +421,9 @@ async def load_all_tools():
         ("netbox-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
         ("google-search-mcp", ["node", "/app/build/index.js"], "tools/list", "tools/call"),
         ("servicenow-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("pyats-mcp", ["python3", "pyats_mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("email-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
+        ("chatgpt-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
     ]
 
     try:
@@ -398,18 +473,15 @@ async def load_all_tools():
 # Load tools
 valid_tools = asyncio.run(load_all_tools())
 
-def format_tool_descriptions(tools: List[Tool]) -> str:
-    return "\n".join(
-        f"- `{tool.name}`: {tool.description or 'No description provided.'}"
-        for tool in tools
-    )
-
 embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 vector_store = InMemoryVectorStore(embedding=embedding)
 
-tool_documents = [
-    Document(page_content=tool.description or "", metadata={"tool_name": tool.name})
+tool_documents =[
+    Document(
+        page_content=f"Tool name: {tool.name}. Tool purpose: {tool.description}",
+        metadata={"tool_name": tool.name}
+    )
     for tool in valid_tools if hasattr(tool, "description")
 ]
 
@@ -418,6 +490,7 @@ document_ids = vector_store.add_documents(tool_documents)
 print("🔧 All bound tools:", [t.name for t in valid_tools])
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
+
 llm_with_tools = llm.bind_tools(valid_tools)
 
 def format_tool_descriptions(tools: List[Tool]) -> str:
@@ -425,112 +498,219 @@ def format_tool_descriptions(tools: List[Tool]) -> str:
     return "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
 
 
+@traceable
 class ContextAwareToolNode(ToolNode):
     """
     A specialized ToolNode that handles tool execution and updates the graph state
-    based on the tool's response.  It assumes that tools return a dictionary.
+    based on the tool's response. It assumes that tools return a dictionary.
     """
 
-    def invoke(self, state: GraphState) -> GraphState:
+    async def ainvoke(
+        self, state: GraphState, config: Optional[RunnableConfig] = None, **kwargs: Any
+    ) -> GraphState:
         """
         Executes the tool call specified in the last AIMessage and updates the state.
-
-        Args:
-            state: The current graph state.
-
-        Returns:
-            The updated graph state.
-
-        Raises:
-            ValueError: If the last message is not an AIMessage with tool calls.
         """
         messages = state["messages"]
         last_message = messages[-1]
 
-        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
-            raise ValueError("Expected an AIMessage with tool_calls")
+        if not isinstance(last_message, AIMessage) or not hasattr(last_message, 'tool_calls') or not last_message.tool_calls:
+            # No tool calls in the last message, or it's not an AIMessage
+            # This might happen if the assistant decided not to call a tool
+            # Decide how to handle this - maybe just pass through or raise specific error
+            logger.warning("ContextAwareToolNode: Last message is not an AIMessage with tool_calls.")
+            # Depending on your graph logic, you might just return the state
+            # or raise a more specific error if this state is unexpected.
+            # Let's assume for now it should proceed to 'handle_tool_results' which returns to assistant
+            return {"messages": messages, "context": state.get("context", {}), "__next__": "handle_tool_results"}
+
 
         tool_calls = last_message.tool_calls
         context = state.get("context", {})
+        used = set(context.get("used_tools", []))
+        tool_messages = [] # Store new tool messages here
 
-        for tool_call in tool_calls:
-            tool = self.tools_by_name[tool_call.name]  # Corrected attribute access
-            tool_input = tool_call.args
+        logger.info(f"🛠️ Processing {len(tool_calls)} tool calls from AIMessage {last_message.id}")
+        for i, tool_call in enumerate(tool_calls):
+            logger.info(f"  -> Processing tool_call #{i+1}")
 
-            logger.info(f"Tool Input (Before Filtering): {tool_input}")  # Logging for debugging
+            # --- FIX: Check structure before access ---
+            if not isinstance(tool_call, dict) or 'name' not in tool_call or 'args' not in tool_call or 'id' not in tool_call:
+                # LangChain ToolCall objects are dict-like, but let's be safe
+                # Or if it IS a dict but missing keys (original error case)
+                logger.error(f"❌ Invalid tool_call structure found: Type={type(tool_call)}, Value={repr(tool_call)}. Skipping.")
+                # Create an error message to send back to the LLM
+                # We need an ID. If it's missing, generate a placeholder or skip. Let's try getting it if possible.
+                error_tool_call_id = getattr(tool_call, 'id', f"invalid_call_{i}") if not isinstance(tool_call, dict) else tool_call.get('id', f"invalid_call_{i}")
+                tool_messages.append(ToolMessage(
+                    tool_call_id=error_tool_call_id,
+                    content=f"Error: Invalid tool call structure received: {repr(tool_call)}",
+                    # Provide a dummy name if unavailable
+                    name=getattr(tool_call, 'name', 'unknown_tool') if not isinstance(tool_call, dict) else tool_call.get('name', 'unknown_tool')
+                ))
+                continue # Skip this malformed call
+            # --- End FIX ---
 
-            # Filter out null values from tool_input
-            filtered_tool_input = {k: v for k, v in tool_input.items() if v is not None}
+            tool_name = tool_call['name'] # Use dictionary access now that we know it's dict-like
+            tool_args = tool_call['args']
+            tool_id = tool_call['id']
+            logger.info(f"     Tool Name: {tool_name}")
+            logger.debug(f"     Tool Args: {tool_args}")
+            logger.debug(f"     Tool ID: {tool_id}")
 
-            logger.info(f"Calling tool: {tool.name} with args: {filtered_tool_input}")
-            tool_response = tool.invoke(filtered_tool_input)  # Execute the tool
-
-            if not isinstance(tool_response, dict):
-                raise ValueError(
-                    f"Tool {tool.name} should return a dictionary, but returned {type(tool_response)}"
+            if not (tool := self.tools_by_name.get(tool_name)):
+                logger.warning(
+                    f"Tool '{tool_name}' requested by LLM not found in available tools. Skipping."
                 )
+                tool_messages.append(ToolMessage(
+                    tool_call_id=tool_id,
+                    content=f"Error: Tool '{tool_name}' not found.",
+                    name=tool_name,
+                ))
+                continue
 
-            logger.info(f"Tool {tool.name} returned: {tool_response}")
+            # Filter out None values AFTER getting the arguments
+            filtered_tool_input = {k: v for k, v in tool_args.items() if v is not None}
+            logger.debug(f"Calling tool: {tool.name} with filtered args: {filtered_tool_input}")
 
-            # Update the context with the tool's output
-            context.update(tool_response)
+            try:
+                # Execute the tool
+                tool_response = await tool.ainvoke(filtered_tool_input, config=config) # Pass config
 
-            # Create a ToolMessage and add it to the message history
-            tool_message = ToolMessage(
-                tool_call_id=tool_call.id,
-                content=tool_response.get("content", str(tool_response)),  # Ensure content is always a string
-                name=tool_call.name,
-            )
-            messages.append(tool_message)
+                logger.debug(f"Raw tool response for {tool.name}: Type={type(tool_response)}, Value={repr(tool_response)}")
 
-        return {"messages": messages, "context": context}
-        
+                # Ensure response content for ToolMessage is string
+                if isinstance(tool_response, dict):
+                    response_content = json.dumps(tool_response) # Serialize dicts
+                elif isinstance(tool_response, (str, int, float, bool)) or tool_response is None:
+                    response_content = str(tool_response)
+                else:
+                    # Attempt to represent other types reasonably
+                    response_content = repr(tool_response)
+
+                logger.debug(f"Serialized response content for ToolMessage: {response_content}")
+
+                used.add(tool.name) # Add to used tools
+
+                # Create ToolMessage
+                tool_messages.append(ToolMessage(
+                    tool_call_id=tool_id,
+                    content=response_content,
+                    name=tool_name,
+                ))
+
+            except Exception as e:
+                logger.error(f"🔥 Error executing tool '{tool_name}': {e}", exc_info=True)
+                # Create an error ToolMessage
+                tool_messages.append(ToolMessage(
+                    tool_call_id=tool_id,
+                    content=f"Error executing tool {tool_name}: {str(e)}",
+                    name=tool_name,
+                ))
+
+        # Update state AFTER the loop
+        context["used_tools"] = list(used)
+        # Add all generated tool messages to the main message list
+        new_messages = messages + tool_messages
+
+        # Return state, rely on graph definition for next step ('handle_tool_results')
+        return {"messages": new_messages, "context": context}
 
 @traceable
-def select_tools(state: GraphState):
+async def select_tools(state: GraphState):
     messages = state.get("messages", [])
     context = state.get("context", {})
     last_user_message = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
 
     if not last_user_message:
+        logger.warning("select_tools: No user message found.")
+        state["selected_tools"] = []
         return {"messages": messages, "context": context}
 
     query = last_user_message.content
-    relevant_docs = vector_store.similarity_search(query, k=8)
-
-    # Gather tool names and descriptions
-    tool_infos = [
-        (doc.metadata["tool_name"], doc.page_content)
-        for doc in relevant_docs
-    ]
-
-    # LLM prompt: choose best tool
-    tool_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an intelligent tool selector. Based on the user request and the available tools, output a comma-separated list of tool names that are best suited for the request. ONLY list tool names. No explanation."),
-        ("human", "User request:\n{query}\n\nAvailable tools:\n{tools}\n\nPick the BEST tool names:")
-    ])
-
-    tool_descriptions = "\n".join(f"- {name}: {desc}" for name, desc in tool_infos)
-    
-    selection_prompt = tool_prompt.format_messages(query=query, tools=tool_descriptions)
+    selected_tool_names = []
 
     try:
-        tool_selection_response = llm.invoke(selection_prompt)
-        selected_tool_names = [name.strip() for name in tool_selection_response.content.strip().split(",")]
-        logger.info(f"🔍 LLM selected tool: {selected_tool_names}")
+        # Step 1: Vector search
+        scored_docs = vector_store.similarity_search_with_score(query, k=35)
+
+        # Step 2: Apply threshold with fallback
+        threshold = 0.50
+        relevant_docs = [doc for doc, score in scored_docs if score >= threshold]
+
+        if not relevant_docs:
+            logger.warning(f"⚠️ No tools above threshold {threshold}. Falling back to top 15 by score.")
+            relevant_docs = [doc for doc, _ in scored_docs[:15]]
+
+        logger.info(f"✅ Selected {len(relevant_docs)} tools after filtering/fallback.")
+
+        # Step 3: Build tool info for LLM
+        tool_infos = {
+            doc.metadata["tool_name"]: doc.page_content
+            for doc in relevant_docs if "tool_name" in doc.metadata
+        }
+
+        if not tool_infos:
+            logger.warning("select_tools: No valid tool_name metadata found.")
+            state["selected_tools"] = []
+            return {"messages": messages, "context": context}
+
+        # Log top tools and scores for debugging
+        logger.info("Top tools with scores:")
+        for doc, score in scored_docs[:10]:
+            if "tool_name" in doc.metadata:
+                logger.info(f"- {doc.metadata['tool_name']}: {score}")
+
+        tool_descriptions_for_prompt = "\n".join(
+            f"- {name}: {desc}" for name, desc in tool_infos.items()
+        )
+
+        # Step 4: LLM refinement
+        tool_prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a precise Tool Selector Assistant. Your task is to choose the most relevant tools from the provided list to fulfill the user's request.
+
+Consider these guidelines:
+- Match tools to the *exact* user intent.
+- Refer to tool descriptions to understand their purpose.
+- Prefer specific tools over general ones if applicable.
+- If multiple tools seem relevant for sequential steps *explicitly requested*, list them.
+- If no tool is a good fit, output "None".
+- Output *only* a comma-separated list of the chosen tool names (e.g., tool_a,tool_b) or the word "None"."""),
+
+            ("human", "User request:\n---\n{query}\n---\n\nAvailable tools:\n---\n{tools}\n---\n\nBased *only* on the tools listed above, which are the best fit for the request? Output only the comma-separated tool names or 'None'.")
+        ])
+
+        selection_prompt_messages = tool_prompt.format_messages(
+            query=query,
+            tools=tool_descriptions_for_prompt
+        )
+
+        logger.info("🤖 Invoking LLM for tool selection...")
+        tool_selection_response = await llm.ainvoke(selection_prompt_messages)
+        raw_selection = tool_selection_response.content.strip()
+
+        logger.info(f"📝 LLM raw tool selection: '{raw_selection}'")
+
+        if raw_selection.lower() == "none" or not raw_selection:
+            selected_tool_names = []
+        else:
+            potential_names = [name.strip() for name in raw_selection.split(',')]
+            selected_tool_names = [name for name in potential_names if name in tool_infos]
+            if len(selected_tool_names) != len(potential_names):
+                logger.warning(f"⚠️ LLM selected invalid tools: {set(potential_names) - set(selected_tool_names)}")
+
     except Exception as e:
-        logger.error(f"⚠️ Tool selection LLM failed: {e}")
-        selected_tool_names = None
+        logger.error(f"🔥 Error during tool selection: {e}", exc_info=True)
+        selected_tool_names = []
 
-    if selected_tool_names:
-        context["selected_tools"] = selected_tool_names
-    else:
-        context["selected_tools"] = [t[0] for t in tool_infos]  # fallback to vector results
-
+    # Final: Update context
+    context["selected_tools"] = list(set(context.get("selected_tools", [])) | set(selected_tool_names))
+    logger.info(f"✅ Final selected tools: {context['selected_tools']}")
     return {
         "messages": messages,
         "context": context
     }
+
 
 system_msg = """You are a helpful file system and diagramming assistant.
 
@@ -539,8 +719,8 @@ system_msg = """You are a helpful file system and diagramming assistant.
 
 IMPORTANT TOOL USAGE GUIDELINES:
 1. GitHub tools require specific parameters:
-   - For creating/updating files, you MUST include: owner, repo, path, content, branch, AND message (for commit message)
-   - Example: create_or_update_file(owner="MyOrg", repo="MyRepo", path="file.md", content="Content", branch="main", message="Commit message")
+    - For creating/updating files, you MUST include: owner, repo, path, content, branch, AND message (for commit message)
+    - Example: create_or_update_file(owner="MyOrg", repo="MyRepo", path="file.md", content="Content", branch="main", message="Commit message")
 
 IMPORTANT: When selecting a tool, follow these strict guidelines:
 1. ALWAYS think step-by-step about what the user is asking for
@@ -553,14 +733,25 @@ THOUGHT PROCESS: Before taking any action, clearly explain your thought process 
 
 
 @traceable
-def assistant(state: GraphState):
+async def assistant(state: GraphState):
     """Handles assistant logic and LLM interaction, with support for sequential tool calls."""
     messages = state.get("messages", [])
     context = state.get("context", {})
     selected_tool_names = context.get("selected_tools", [])
     run_mode = context.get("run_mode", "start")
+    used = set(context.get("used_tools", []))
 
-    tools_to_use = [tool for tool in valid_tools if tool.name in selected_tool_names] if selected_tool_names else valid_tools
+    # If selected_tool_names is empty, fall back to ALL tools not already used
+    if selected_tool_names:
+        tools_to_use = [
+            tool for tool in valid_tools
+            if tool.name in selected_tool_names and tool.name not in used
+        ]
+    else:
+        tools_to_use = [
+            tool for tool in valid_tools
+            if tool.name not in used
+        ]
 
     # If we're in continuous mode, don't re-select tools
     if run_mode == "continue":
@@ -576,7 +767,7 @@ def assistant(state: GraphState):
             new_messages = [SystemMessage(content=system_msg)] + messages
 
             llm_with_tools = llm.bind_tools(tools_to_use)
-            response = llm_with_tools.invoke(new_messages, config={"tool_choice": "auto"})
+            response = await llm_with_tools.ainvoke(new_messages, config={"tool_choice": "auto"})
 
             if hasattr(response, "tool_calls") and response.tool_calls:
                 # Continue using tools
@@ -594,7 +785,7 @@ def assistant(state: GraphState):
     try:
         logger.info(f"assistant: Invoking LLM with new_messages: {new_messages}")
         # Always use auto tool choice to allow model to decide which tools to use
-        response = llm_with_tools.invoke(new_messages, config={"tool_choice": "auto"})
+        response = await llm_with_tools.ainvoke(new_messages, config={"tool_choice": "auto"})
         logger.info(f"Raw LLM Response: {response}")
 
         if not isinstance(response, AIMessage):
@@ -604,62 +795,65 @@ def assistant(state: GraphState):
         response = AIMessage(content=f"LLM Error: {e}")
 
     if hasattr(response, "tool_calls") and response.tool_calls:
-        # Update context to indicate we're in a tool sequence
         context["run_mode"] = "continue"
         return {"messages": [response], "context": context, "__next__": "tools"}
     else:
-        # Reset mode if no tools are called
         context["run_mode"] = "start"
         return {"messages": [response], "context": context, "__next__": "__end__"}
 
 @traceable
-def handle_tool_results(state: GraphState):
-    """Handles tool results and determines if more tools should be used."""
+async def handle_tool_results(state: GraphState):
+    """Handles tool results and determines the next step."""
     messages = state.get("messages", [])
     context = state.get("context", {})
-    
-    # Check if we should continue with more tools or go back to the LLM
-    return {"messages": messages, "context": context, "__next__": "assistant"}
+
+    # Always reset run_mode after tool execution
+    context["run_mode"] = "start"
+
+    return {
+        "messages": messages,
+        "context": context,
+        "__next__": "assistant"  # Go back to the assistant to process tool results
+    }
 
 # Graph setup
 graph_builder = StateGraph(GraphState)
+
+# Define core nodes
 graph_builder.add_node("select_tools", select_tools)
 graph_builder.add_node("assistant", assistant)
 graph_builder.add_node("tools", ContextAwareToolNode(tools=valid_tools))
 graph_builder.add_node("handle_tool_results", handle_tool_results)
 
-# Updated edges
+# Define clean and minimal edges
+# Start flow
+graph_builder.add_edge(START, "select_tools")
+
+# After tool selection, go to assistant
+graph_builder.add_edge("select_tools", "assistant")
+
+# Assistant decides: use tool or end
 graph_builder.add_conditional_edges(
     "assistant",
     lambda state: state.get("__next__", "__end__"),
     {
         "tools": "tools",
-        "select_tools": "select_tools",
         "__end__": END,
     }
 )
 
-graph_builder.add_conditional_edges(
-    "handle_tool_results",
-    lambda state: "select_tools" if state["context"].get("reselect", False) else "assistant",
-    {
-        "select_tools": "select_tools",
-        "assistant": "assistant"
-    }
-)
-
-# After tools execute, go to the handler
+# Tools always go to handler
 graph_builder.add_edge("tools", "handle_tool_results")
-# After handling results, go back to assistant for potential more tool calls
-graph_builder.add_edge("handle_tool_results", "assistant")
-graph_builder.add_edge("select_tools", "assistant")
-graph_builder.add_edge(START, "select_tools")
 
+# Tool results always return to assistant
+graph_builder.add_edge("handle_tool_results", "assistant")
+
+# Compile graph
 compiled_graph = graph_builder.compile()
 
 async def run_cli_interaction():
     """Runs the CLI interaction loop."""
-    state = {"messages": [], "context": {}}
+    state = {"messages": [], "context": {"used_tools": []}}
     while True:
         user_input = input("User: ")
         if user_input.lower() in ["exit", "quit"]:
@@ -668,6 +862,7 @@ async def run_cli_interaction():
 
         user_message = HumanMessage(content=user_input)
         state["messages"].append(user_message)
+        state["context"]["used_tools"] = [] # Reset used tools for each new user turn
 
         print("🚀 Invoking graph...")
         result = await compiled_graph.ainvoke(state, config={"recursion_limit": 100})
