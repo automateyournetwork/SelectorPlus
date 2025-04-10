@@ -4,6 +4,7 @@ WORKDIR /app
 
 RUN pip install requests
 RUN pip install python-dotenv
+RUN pip install pydantic
 
 COPY . .
 

@@ -35,20 +35,20 @@ logger.info(f"✅ Using testbed file: {TESTBED_PATH}")
 
 # --- Pydantic Models for Input Validation (Keep as is) ---
 class DeviceCommandInput(BaseModel):
-    device_name: str = Field(..., description="The name of the device in the testbed.")
-    command: str = Field(..., description="The command to execute (e.g., 'show ip interface brief', 'ping 8.8.8.8').")
+    device_name: str = Field(..., title="Device Name", description="The name of the device in the testbed.")
+    command: str = Field(..., title="Command", description="The command to execute (e.g., 'show ip interface brief', 'ping 8.8.8.8').")
 
 class ConfigInput(BaseModel):
-    device_name: str = Field(..., description="The name of the device in the testbed.")
-    config_commands: str = Field(..., description="Single or multi-line configuration commands.")
+    device_name: str = Field(..., title="Device Name", description="The name of the device in the testbed.")
+    config_commands: str = Field(..., title="Config Commands", description="Single or multi-line configuration commands.")
 
 class DeviceOnlyInput(BaseModel):
-     device_name: str = Field(..., description="The name of the device in the testbed.")
+    device_name: str = Field(..., title="Device Name", description="The name of the device in the testbed.")
 
 class LinuxCommandInput(BaseModel):
-    device_name: str = Field(..., description="The name of the Linux device in the testbed.")
-    command: str = Field(..., description="Linux command to execute (e.g., 'ifconfig', 'ls -l /home')")
-
+    device_name: str = Field(..., title="Linux Device Name", description="The name of the Linux device in the testbed.")
+    command: str = Field(..., title="Linux Command", description="Linux command to execute (e.g., 'ifconfig', 'ls -l /home')")
+    
 # --- Core pyATS Functions (Keep as is) ---
 # _get_device, _disconnect_device, run_show_command, apply_device_configuration,
 # execute_learn_config, execute_learn_logging, run_ping_command
@@ -361,16 +361,39 @@ AVAILABLE_TOOLS = {
     },
 }
 
+logger.info(f"🚀 Registered {len(AVAILABLE_TOOLS)} tools at startup: {list(AVAILABLE_TOOLS.keys())}")
+
 # --- JSON-RPC Handling ---
 
 def discover_tools() -> List[Dict[str, Any]]:
+    logger.info(f"🛠 discover_tools(): AVAILABLE_TOOLS keys: {list(AVAILABLE_TOOLS.keys())}")
     tools_list = []
+
     for name, tool_info in AVAILABLE_TOOLS.items():
+        raw_schema = tool_info["input_model"].model_json_schema()
+
+        cleaned_properties = {
+            k: {k2: v2 for k2, v2 in v.items() if k2 != "title"}
+            for k, v in raw_schema.get("properties", {}).items()
+        }
+
+        input_schema = {
+            "type": "object",
+            "properties": cleaned_properties,
+            "required": raw_schema.get("required", []),
+            "additionalProperties": False
+        }
+
         tools_list.append({
             "name": name,
             "description": tool_info["description"],
-            "inputSchema": tool_info["input_model"].schema()
+            "parameters": input_schema
         })
+
+    logger.info(f"✅ discover_tools() returning {len(tools_list)} tools")
+    logger.info("🔍 Full tool dump for verification:")
+    for tool in tools_list:
+        logger.info(json.dumps(tool, indent=2))
     return tools_list
 
 # Synchronous tool calling (unchanged, used in thread executor)
@@ -407,14 +430,49 @@ async def process_request(request_data: Dict[str, Any]) -> Optional[Dict[str, An
 
     method = request_data["method"]
     params = request_data.get("params", {})
+    logger.info(f"📥 Incoming method: {method}, params: {params}")
 
     response_content = None
     error_content = None
 
     logger.debug(f"Processing method: {method}")
 
-    if method == "tools/discover":
-        response_content = discover_tools()
+    request_id = request_data.get("id")
+    method = request_data.get("method")
+
+    # VS Code sends this notification right after starting
+    if method == "notifications/initialized":
+        logger.info("Received VS Code initialization notification.")
+        return None  # Don't send a response for notifications
+
+    if method == "initialize":
+        logger.info("✅ Handshake: returning MCP capabilities")
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "capabilities": {
+                    "tools": {
+                        "discover": True,
+                        "call": True
+                    }
+                },
+                "serverInfo": {
+                    "name": "pyATS MCP Server",
+                    "version": "1.0.0"
+                }
+            }
+        }
+
+    if method in ("tools/discover", "tools/list"):
+        logger.info(f"⚙️ {method} → Discovering tools...")
+        tools = discover_tools()
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": tools
+        }
+
     elif method == "tools/call":
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
@@ -464,6 +522,7 @@ def monitor_stdin():
     logger.info("Stdin monitoring thread started.")
     while True:
         try:
+            logger.debug("Waiting for input...")
             line = sys.stdin.readline()
             if not line:
                 logger.warning("Stdin closed or empty line received. Keeping monitor thread alive.")
@@ -479,10 +538,11 @@ def monitor_stdin():
             try:
                 request_data = json.loads(line)
                 response = asyncio.run(process_request(request_data))
+
                 if response:
                     send_response(response)
                 else:
-                    logger.error("process_request returned None, which is unexpected.")
+                    logger.info("No response (likely a notification). Continuing...")
 
             except json.JSONDecodeError as e:
                 logger.error(f"JSON decode error: {e} for line: '{line}'")
@@ -498,10 +558,11 @@ def monitor_stdin():
                     "error": {"code": -32603, "message": f"Internal server error: {e}"},
                     "id": None
                 })
+
         except Exception as e:
             logger.error(f"Exception in monitor_stdin loop: {e}", exc_info=True)
             time.sleep(0.1)
-        logger.info("Stdin monitoring thread finished.")
+
 
 async def run_server_oneshot():
     """Reads one JSON request from stdin and writes one JSON response to stdout."""
