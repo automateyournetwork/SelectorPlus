@@ -5,7 +5,7 @@ import inspect
 import logging
 import importlib
 import subprocess
-from functools import wraps
+from functools import wraps, partial
 from dotenv import load_dotenv
 from langsmith import traceable
 from pydantic import BaseModel, Field
@@ -303,8 +303,36 @@ class MCPToolDiscovery:
             logger.critical(f"🔥 Critical async tool call error for {tool_name}", exc_info=True)
             return f"Critical Error during tool call: {str(e)}"
 
+# Add these helper functions somewhere *before* get_tools_for_service in selectorplus.py
+# --- Base async functions OUTSIDE the loop ---
+async def _base_mcp_call(tool_name_to_call: str, service_discovery_instance: MCPToolDiscovery, args_dict: dict):
+    """Generic async function to call an MCP tool."""
+    logger.info(f"PARTIAL_TRACE: _base_mcp_call invoked for '{tool_name_to_call}' with args {args_dict}")
+    # Directly call the instance method
+    return await service_discovery_instance.call_tool(tool_name_to_call, args_dict)
+
+async def _structured_mcp_call(tool_name_to_call: str, service_discovery_instance: MCPToolDiscovery, pydantic_model: type[BaseModel], **kwargs):
+    """Generic async function for structured MCP tools with Pydantic validation."""
+    logger.info(f"PARTIAL_TRACE: _structured_mcp_call invoked for '{tool_name_to_call}' with raw kwargs {kwargs}")
+    try:
+        # Validate and clean args using Pydantic model
+        validated_args = pydantic_model(**kwargs).model_dump(exclude_unset=True) # Use model_dump for Pydantic v2+
+        logger.info(f"PARTIAL_TRACE: Validation successful for '{tool_name_to_call}', validated args: {validated_args}")
+        # Directly call the instance method
+        return await service_discovery_instance.call_tool(tool_name_to_call, validated_args)
+    except ValidationError as ve:
+        logger.warning(f"PARTIAL_TRACE: Pydantic validation failed for {tool_name_to_call}: {ve}")
+        # Return an error structure ToolNode can process (e.g., JSON string in content)
+        # Ensure the content is a string for ToolMessage
+        return json.dumps({"status": "error", "error": f"Input validation failed: {ve}"})
+    except Exception as e:
+        logger.error(f"PARTIAL_TRACE: Unexpected error during structured call for {tool_name_to_call}: {e}", exc_info=True)
+        return json.dumps({"status": "error", "error": f"Unexpected error during tool execution: {e}"})
+
+
+# --- Replace the existing get_tools_for_service function in selectorplus.py with this ---
 async def get_tools_for_service(service_name, command, discovery_method, call_method, service_discoveries):
-    """Enhanced tool discovery for each service."""
+    """Enhanced tool discovery using functools.partial for safe coroutine binding."""
     print(f"🕵️ Discovering tools for: {service_name}")
     discovery = MCPToolDiscovery(
         container_name=service_name,
@@ -332,72 +360,67 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
                 continue
 
             tool_description = tool_info.get("description", f"Tool {tool_name} from {service_name}") # Default desc
-            tool_schema = tool_info.get("inputSchema") or tool_info.get("parameters", {})
+            # Use 'parameters' as the key based on your MCP server output schema
+            tool_schema = tool_info.get("parameters", {})
 
-            # --- Define the core async logic ---
-            # Capture tool_name's value for this specific iteration
-            current_tool_name = tool_name
-            async def _base_coroutine(**kwargs):
-                # Use current_tool_name captured from the loop iteration
-                logger.debug(f"Executing _base_coroutine for {current_tool_name} with {kwargs}")
-                return await service_discoveries[service_name].call_tool(current_tool_name, kwargs)
+            # Use functools.partial to create the coroutine safely binding current values
+            specific_service_discovery = service_discoveries[service_name] # Get instance for this service
 
-            # --- Define a placeholder sync function ---
-            def _dummy_sync_func(*args, **kwargs):
-                 # Use current_tool_name captured from the loop iteration
-                logger.warning(f"Attempted sync call to async-only tool: {current_tool_name}")
-                raise NotImplementedError(f"Tool '{current_tool_name}' from {service_name} can only be called asynchronously.")
-
-
-            if tool_schema and tool_schema.get("type") == "object":
-                # --- StructuredTool Path ---
+            # Check if schema exists, is an object, and has properties for StructuredTool
+            if tool_schema and tool_schema.get("type") == "object" and tool_schema.get("properties"):
                 try:
-                    input_model = schema_to_pydantic_model(tool_name + "_Input", tool_schema)
+                    input_model = schema_to_pydantic_model(f"{service_name.replace('-', '_')}_{tool_name}_Input", tool_schema)
 
-                    # Wrapper to validate args before calling base coroutine
-                    async def _structured_coroutine(**kwargs):
-                         # Validate and clean args using Pydantic model
-                         # exclude_unset=True avoids passing None for optional fields if not provided
-                         validated_args = input_model(**kwargs).dict(exclude_unset=True)
-                         logger.debug(f"Executing _structured_coroutine for {current_tool_name} with validated {validated_args}")
-                         # Use current_tool_name captured from the loop iteration
-                         return await service_discoveries[service_name].call_tool(current_tool_name, validated_args)
+                    # Create the partial function for the structured call
+                    # This binds the *current* values of tool_name, specific_service_discovery, and input_model
+                    tool_coroutine = partial(
+                        _structured_mcp_call,
+                        tool_name,
+                        specific_service_discovery,
+                        input_model
+                    )
 
-                    structured_tool = StructuredTool( # Use base constructor
+                    structured_tool = StructuredTool.from_function( # Use class method for easier creation
                         name=tool_name,
                         description=tool_description,
                         args_schema=input_model,
-                        func=_dummy_sync_func,       # Sync placeholder
-                        coroutine=_structured_coroutine # Explicit async implementation
+                        coroutine=tool_coroutine # Pass the partial coroutine
                     )
                     tools.append(structured_tool)
-                    logger.debug(f"✅ Added StructuredTool: {tool_name}")
+                    logger.debug(f"✅ Added StructuredTool (via partial): {tool_name}")
 
                 except Exception as e:
-                    # Log the specific error during Pydantic/StructuredTool creation
-                    logger.warning(f"⚠️ Failed to build structured tool {tool_name}: {e}. Adding as simple tool.")
-                    # Fallback to simple tool if schema parsing or model creation fails
-                    simple_tool = Tool(
+                    logger.warning(f"⚠️ Failed to build structured tool {tool_name} via partial: {e}. Adding as simple tool.")
+                    # Fallback: Create partial for the simple base call
+                    tool_coroutine = partial(
+                         _base_mcp_call,
+                         tool_name,
+                         specific_service_discovery
+                     )
+                    simple_tool = Tool.from_function( # Use class method
                         name=tool_name,
                         description=tool_description,
-                        func=_dummy_sync_func,     # Sync placeholder
-                        coroutine=_base_coroutine   # Basic async call without Pydantic validation
+                        func=None, # No sync implementation
+                        coroutine=tool_coroutine
                     )
                     tools.append(simple_tool)
-                    logger.debug(f"✅ Added Simple Tool (fallback): {tool_name}")
-
-
+                    logger.debug(f"✅ Added Simple Tool (fallback via partial): {tool_name}")
             else:
-                 # --- Simple Tool Path (No args or non-object schema) ---
-                simple_tool = Tool(
+                # Simple Tool Path (No args/schema or non-object schema)
+                # Create partial for the simple base call
+                tool_coroutine = partial(
+                    _base_mcp_call,
+                    tool_name,
+                    specific_service_discovery
+                )
+                simple_tool = Tool.from_function( # Use class method
                     name=tool_name,
                     description=tool_description,
-                    func=_dummy_sync_func,     # Sync placeholder
-                    coroutine=_base_coroutine   # Use the base async wrapper directly
+                    func=None, # No sync implementation
+                    coroutine=tool_coroutine # Use the partial coroutine
                 )
                 tools.append(simple_tool)
-                logger.debug(f"✅ Added Simple Tool: {tool_name}")
-
+                logger.debug(f"✅ Added Simple Tool (via partial): {tool_name}")
 
     except Exception as e:
         # Log any error during the overall discovery/processing for the service
@@ -579,35 +602,70 @@ class ContextAwareToolNode(ToolNode):
 
                 logger.debug(f"Raw tool response for {tool.name}: Type={type(tool_response)}, Value={repr(tool_response)}")
 
-                # Ensure response content for ToolMessage is string
-                if isinstance(tool_response, dict):
-                    response_content = json.dumps(tool_response) # Serialize dicts
-                elif isinstance(tool_response, (str, int, float, bool)) or tool_response is None:
-                    response_content = str(tool_response)
+                # --- Start Refined Logic ---
+                # First, check if tool_response is already a string (e.g., from an error during the call)
+                if isinstance(tool_response, str):
+                    try:
+                        # Try parsing it as JSON in case the tool returned a JSON string error
+                        tool_data = json.loads(tool_response)
+                    except json.JSONDecodeError:
+                        # If it's not JSON, use the string directly (might be a simple error message)
+                        tool_data = tool_response
+                        logger.debug(f"Tool response is a non-JSON string for {tool.name}: {tool_data}")
                 else:
-                    # Attempt to represent other types reasonably
-                    response_content = repr(tool_response)
+                    # Assume it's likely a dict if not a string
+                    tool_data = tool_response
 
-                logger.debug(f"Serialized response content for ToolMessage: {response_content}")
+                response_content = "" # Default
 
-                used.add(tool.name) # Add to used tools
+                if isinstance(tool_data, dict):
+                    # Check for standard success structure
+                    if tool_data.get("status") == "completed" and "output" in tool_data:
+                        output_data = tool_data["output"]
+                        # ** Specific handling for ask_selector's expected output **
+                        if tool_name == "ask_selector" and isinstance(output_data, dict) and "content" in output_data:
+                            response_content = output_data["content"] # Extract the natural language answer
+                            logger.debug(f"Extracted NL content for {tool_name}: {response_content[:100]}...") # Log snippet
+                        else:
+                            # General case for other tools or if ask_selector format changes
+                            response_content = json.dumps(output_data) # Serialize just the 'output' part
+                            logger.debug(f"Serialized output part for {tool_name}: {response_content[:100]}...")
+                    # Check for standard error structure
+                    elif "error" in tool_data:
+                        error_info = tool_data['error']
+                        response_content = f"Tool Error: {json.dumps(error_info)}"
+                        logger.debug(f"Serialized error part for {tool_name}: {response_content[:100]}...")
+                    else:
+                        # Fallback if structure is unexpected
+                        response_content = json.dumps(tool_data)
+                        logger.debug(f"Serialized whole unexpected dict for {tool_name}: {response_content[:100]}...")
+                elif isinstance(tool_data, str):
+                     # If tool_data ended up being a string (e.g., simple error before JSON parsing)
+                     response_content = tool_data
+                     logger.debug(f"Using direct string response for {tool.name}: {response_content[:100]}...")
+                else:
+                    # If tool_response wasn't a dict or string originally
+                    response_content = str(tool_data) # Stringify directly
+                    logger.debug(f"Stringified unexpected type response for {tool.name}: {response_content[:100]}...")
 
-                # Create ToolMessage
+                # Create ToolMessage with the refined content
                 tool_messages.append(ToolMessage(
                     tool_call_id=tool_id,
-                    content=response_content,
+                    content=response_content, # Use the refined content
                     name=tool_name,
                 ))
+                used.add(tool.name) # Add to used tools AFTER successful processing
+                # --- End Refined Logic ---
 
             except Exception as e:
-                logger.error(f"🔥 Error executing tool '{tool_name}': {e}", exc_info=True)
-                # Create an error ToolMessage
+                # Keep existing error handling for exceptions during tool execution *itself*
+                logger.error(f"🔥 Error executing/processing tool '{tool_name}': {e}", exc_info=True)
                 tool_messages.append(ToolMessage(
                     tool_call_id=tool_id,
                     content=f"Error executing tool {tool_name}: {str(e)}",
                     name=tool_name,
                 ))
-
+    
         # Update state AFTER the loop
         context["used_tools"] = list(used)
         # Add all generated tool messages to the main message list
