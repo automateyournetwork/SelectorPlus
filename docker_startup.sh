@@ -113,9 +113,13 @@ echo "Starting slack-mcp container..."
 docker run -dit --name slack-mcp -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-YOUR_SLACK_BOT_TOKEN}" -e SLACK_TEAM_ID="${SLACK_TEAM_ID:-YOUR_SLACK_TEAM_ID}" slack-mcp
 echo "slack-mcp container started."
 
-echo "Starting selector-mcp container..."
-docker run -d --name selector-mcp -e SELECTOR_URL="${SELECTOR_URL:-YOUR_SELECTOR_URL}" -e SELECTOR_AI_API_KEY="${SELECTOR_AI_API_KEY:-YOUR_SELECTOR_AI_API_KEY}" selector-mcp python3 mcp_server.py --restart unless-stopped
-echo "selector-mcp container started."
+docker run -d \
+  --name selector-mcp \
+  -e SELECTOR_URL="${SELECTOR_URL:-YOUR_SELECTOR_URL}" \
+  -e SELECTOR_AI_API_KEY="${SELECTOR_AI_API_KEY:-YOUR_SELECTOR_AI_API_KEY}" \
+  --restart=unless-stopped \
+  selector-mcp \
+  sleep infinity
 
 echo "Starting excalidraw-mcp container..."
 docker run -dit --name excalidraw-mcp excalidraw-mcp
