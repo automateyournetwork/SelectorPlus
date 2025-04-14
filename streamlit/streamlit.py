@@ -117,10 +117,6 @@ if prompt := st.chat_input("Enter your message"):
                 timeout=30,
             )
 
-            # Debug: Print full response
-            # st.write(f"Response Status: {response.status_code}")
-            # st.write(f"Response Content: {response.text}")
-
             if response.status_code == 200:
                 lines = response.text.strip().split("\n")
                 ai_messages = []
@@ -138,8 +134,13 @@ if prompt := st.chat_input("Enter your message"):
                                     # ✅ Catch tool responses that have "tool_call_id" (ToolMessage)
                                     elif "tool_call_id" in msg and "content" in msg:
                                         try:
-                                            tool_response = json.loads(msg["content"])
-                                            # Support structured {"result": {..., content: "..."}}
+                                            # 🛠️ FIXED: Support structured object directly
+                                            content_raw = msg["content"]
+                                            if isinstance(content_raw, str):
+                                                tool_response = json.loads(content_raw)
+                                            else:
+                                                tool_response = content_raw
+
                                             if isinstance(tool_response, dict):
                                                 if "result" in tool_response:
                                                     result = tool_response["result"]
@@ -151,10 +152,11 @@ if prompt := st.chat_input("Enter your message"):
                                                     ai_messages.append(tool_response["content"])
                                             else:
                                                 ai_messages.append(str(tool_response))
-                                        except json.JSONDecodeError:
-                                            ai_messages.append(msg["content"])  # Fallback if it's just raw text
 
-                                        # 🛠️ Handle tool calls like Slack, if present
+                                        except json.JSONDecodeError:
+                                            ai_messages.append(str(msg["content"]))  # Fallback if it's just raw text
+
+                                        # 🛠️ Handle tool calls like Slack
                                         if "tool_calls" in msg:
                                             for tool_call in msg["tool_calls"]:
                                                 if tool_call["name"] == "slack_post_message":
@@ -168,7 +170,11 @@ if prompt := st.chat_input("Enter your message"):
                                                     )
                                                     if tool_output:
                                                         try:
-                                                            tool_output_json = json.loads(tool_output)
+                                                            if isinstance(tool_output, str):
+                                                                tool_output_json = json.loads(tool_output)
+                                                            else:
+                                                                tool_output_json = tool_output
+
                                                             if tool_output_json.get("ok"):
                                                                 ai_messages.append("✅ Message sent successfully to Slack.")
                                                             else:
@@ -178,7 +184,7 @@ if prompt := st.chat_input("Enter your message"):
 
                         except json.JSONDecodeError:
                             st.error(f"JSON Decode Error in line: {line}")
-
+                            
                 if ai_messages:
                     # Use the last AI message
                     ai_response = ai_messages[-1]
