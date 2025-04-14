@@ -50,11 +50,6 @@ docker build -t filesystem-mcp ./filesystem
 if [ $? -ne 0 ]; then echo "Error building filesystem-mcp image."; exit 1; fi
 echo "filesystem-mcp image built successfully."
 
-echo "Building streamlit-app image..."
-docker build -t streamlit-app ./streamlit
-if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
-echo "streamlit-app image built successfully."
-
 echo "Building netbox-mcp image..."
 docker build -t netbox-mcp ./netbox
 if [ $? -ne 0 ]; then echo "Error building netbox-mcp image."; exit 1; fi
@@ -84,6 +79,32 @@ echo "Building chatgpt-mcp image..."
 docker build -t chatgpt-mcp ./chatgpt
 if [ $? -ne 0 ]; then echo "Error building chatgpt-mcp image."; exit 1; fi
 echo "chatgpt-mcp image built successfully."
+
+echo "Building quickchart-mcp image..."
+docker build -t quickchart-mcp ./quickchart
+if [ $? -ne 0 ]; then echo "Error building quickchart-mcp image."; exit 1; fi
+echo "quickchart-mcp image built successfully."
+
+echo "Building vegalite-mcp image..."
+docker build -t vegalite-mcp ./vegalite
+echo "vegalite-mcp image built successfully"
+
+echo "Building mermaid-mcp image..."
+docker build -t mermaid-mcp ./mermaid
+echo "mermaid-mcp image built successfully"
+
+echo "Building rfc-mcp image..."
+docker build -t rfc-mcp ./rfc
+echo "rfc-mcp image built successfully"
+
+echo "Building nist-mcp image..."
+docker build -t nist-mcp ./nist
+echo "nist-mcp image built successfully"
+
+echo "Building streamlit-app image..."
+docker build -t streamlit-app ./streamlit
+if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
+echo "streamlit-app image built successfully."
 
 # Build langgraph container
 echo "Building langgraph container..."
@@ -156,6 +177,35 @@ docker run -dit --name chatgpt-mcp \
  --env-file .env \
  chatgpt-mcp python3 server.py --restart unless-stopped
 echo "chatgpt-mcp container started."
+
+echo "Starting quickchart-mcp container..."
+docker run -dit --name quickchart-mcp quickchart-mcp
+echo "quickchart-mcp container started."
+
+echo "Starting vegalite-mcp container..."
+docker run -dit --name vegalite-mcp \
+  -v "/home/johncapobianco/MCPyATS:/output" \
+  vegalite-mcp
+echo "vegalite-mcp container started."
+
+echo "Starting mermaid-mcp container..."
+docker run -dit --name mermaid-mcp \
+  -v "/home/johncapobianco/MCPyATS:/output" \
+  -e CONTENT_IMAGE_SUPPORTED=false \
+  mermaid-mcp
+echo "mermaid-mcp container started."
+
+echo "Starting rfc-mcp container..."
+docker run -dit --name rfc-mcp rfc-mcp
+echo "rfc-mcp container started."
+
+echo "Starting nist-mcp container..."
+docker run -dit \
+  --name nist-mcp \
+  --env-file .env \
+  --dns 8.8.8.8 \
+  nist-mcp 
+echo "nist-mcp container started."
 
 echo "Starting pyats-mcp container..."
 docker run -d --name pyats-mcp \
