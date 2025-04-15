@@ -1,0 +1,2963 @@
+{
+  "name": "Cisco pyATS Agent Enhanced with Model Context Protocol",
+  "description": "LangGraph-based MCP agent for Cisco pyATS and other tools with a focus on network automation for the Cisco DevNet Cisco Modeling Labs Sandbox",
+  "version": "1.0",
+  "url": "http://localhost:10000",
+  "capabilities": [
+    "a2a",
+    "tool-use",
+    "chat"
+  ],
+  "input": {
+    "type": "text"
+  },
+  "output": {
+    "type": "text"
+  },
+  "tools": [
+    {
+      "name": "pyATS_run_show_command",
+      "description": "Executes a general Cisco IOS/NX-OS 'show' command (e.g., 'show ip interface brief', 'show version', 'show inventory') on a specified device to gather its current operational state or specific information. Returns parsed JSON output when available, otherwise returns raw text output. Use this for general device information gathering. Requires 'device_name' and the exact 'command' string.",
+      "parameters": {
+        "properties": {
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          },
+          "command": {
+            "title": "Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name",
+          "command"
+        ],
+        "title": "pyATS_run_show_command_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "pyATS_configure_device",
+      "description": "Applies configuration commands to a specified Cisco IOS/NX-OS device. Enters configuration mode and executes the provided commands to modify the device's settings. Use this for making changes to the device configuration. Requires 'device_name' and the 'config_commands' (can be multi-line).",
+      "parameters": {
+        "properties": {
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          },
+          "config_commands": {
+            "title": "Config Commands",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name",
+          "config_commands"
+        ],
+        "title": "pyATS_configure_device_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "pyATS_show_running_config",
+      "description": "Retrieves the full running configuration from a Cisco IOS/NX-OS device using 'show running-config'. Returns raw text output as there is no parser available. Requires 'device_name'.",
+      "parameters": {
+        "properties": {
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name"
+        ],
+        "title": "pyATS_show_running_config_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "pyATS_show_logging",
+      "description": "Retrieves recent system logs using 'show logging last 250' on a Cisco IOS/NX-OS device. Returns raw text output. Requires 'device_name'.",
+      "parameters": {
+        "properties": {
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name"
+        ],
+        "title": "pyATS_show_logging_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "pyATS_ping_from_network_device",
+      "description": "Executes a 'ping' command on a specified Cisco IOS/NX-OS device to test network reachability to a target IP address or hostname (e.g., 'ping 8.8.8.8', 'ping vrf MGMT 10.0.0.1'). Returns parsed JSON output for standard pings when possible, otherwise raw text. Requires 'device_name' and the exact 'command' string.",
+      "parameters": {
+        "properties": {
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          },
+          "command": {
+            "title": "Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name",
+          "command"
+        ],
+        "title": "pyATS_ping_from_network_device_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "pyATS_run_linux_command",
+      "description": "Executes common Linux commands on a specified device (e.g., 'ifconfig', 'ps -ef', 'netstat -rn', including piping and redirection). Parsed output is returned when available, otherwise raw output.",
+      "parameters": {
+        "properties": {
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          },
+          "command": {
+            "title": "Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name",
+          "command"
+        ],
+        "title": "pyATS_run_linux_command_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_or_update_file",
+      "description": "Create or update a single file in a GitHub repository",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "branch": {
+            "title": "Branch",
+            "type": "string"
+          },
+          "sha": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sha"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "path",
+          "content",
+          "message",
+          "branch"
+        ],
+        "title": "create_or_update_file_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_repositories",
+      "description": "Search for GitHub repositories",
+      "parameters": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          },
+          "perPage": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Perpage"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "search_repositories_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_repository",
+      "description": "Create a new GitHub repository in your account",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "private": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Private"
+          },
+          "autoInit": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Autoinit"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "create_repository_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_file_contents",
+      "description": "Get the contents of a file or directory from a GitHub repository",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "path"
+        ],
+        "title": "get_file_contents_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "push_files",
+      "description": "Push multiple files to a GitHub repository in a single commit",
+      "parameters": {
+        "$defs": {
+          "push_files_Input_files_Item": {
+            "properties": {
+              "path": {
+                "title": "Path",
+                "type": "string"
+              },
+              "content": {
+                "title": "Content",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "content"
+            ],
+            "title": "push_files_Input_files_Item",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "branch": {
+            "title": "Branch",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/$defs/push_files_Input_files_Item"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "branch",
+          "files",
+          "message"
+        ],
+        "title": "push_files_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_issue",
+      "description": "Create a new issue in a GitHub repository",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "assignees": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Assignees"
+          },
+          "milestone": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Milestone"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Labels"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "title"
+        ],
+        "title": "create_issue_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_pull_request",
+      "description": "Create a new pull request in a GitHub repository",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "head": {
+            "title": "Head",
+            "type": "string"
+          },
+          "base": {
+            "title": "Base",
+            "type": "string"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Draft"
+          },
+          "maintainer_can_modify": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Maintainer Can Modify"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "title",
+          "head",
+          "base"
+        ],
+        "title": "create_pull_request_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fork_repository",
+      "description": "Fork a GitHub repository to your account or specified organization",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "organization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Organization"
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "title": "fork_repository_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_branch",
+      "description": "Create a new branch in a GitHub repository",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "branch": {
+            "title": "Branch",
+            "type": "string"
+          },
+          "from_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "From Branch"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "branch"
+        ],
+        "title": "create_branch_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_commits",
+      "description": "Get list of commits of a branch in a GitHub repository",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sha"
+          },
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          },
+          "perPage": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Perpage"
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "title": "list_commits_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_issues",
+      "description": "List issues in a GitHub repository with filtering options",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Direction"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Labels"
+          },
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          },
+          "per_page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Per Page"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Since"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sort"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "title": "list_issues_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_issue",
+      "description": "Update an existing issue in a GitHub repository",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "assignees": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Assignees"
+          },
+          "milestone": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Milestone"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Labels"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "issue_number"
+        ],
+        "title": "update_issue_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_issue_comment",
+      "description": "Add a comment to an existing issue",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "issue_number",
+          "body"
+        ],
+        "title": "add_issue_comment_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_code",
+      "description": "Search for code across GitHub repositories",
+      "parameters": {
+        "properties": {
+          "q": {
+            "title": "Q",
+            "type": "string"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Order"
+          },
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          },
+          "per_page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Per Page"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "title": "search_code_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_issues",
+      "description": "Search for issues and pull requests across GitHub repositories",
+      "parameters": {
+        "properties": {
+          "q": {
+            "title": "Q",
+            "type": "string"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Order"
+          },
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          },
+          "per_page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Per Page"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sort"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "title": "search_issues_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_users",
+      "description": "Search for users on GitHub",
+      "parameters": {
+        "properties": {
+          "q": {
+            "title": "Q",
+            "type": "string"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Order"
+          },
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          },
+          "per_page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Per Page"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sort"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "title": "search_users_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_issue",
+      "description": "Get details of a specific issue in a GitHub repository.",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "issue_number": {
+            "title": "Issue Number"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "issue_number"
+        ],
+        "title": "get_issue_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_pull_request",
+      "description": "Get details of a specific pull request",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "title": "get_pull_request_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_pull_requests",
+      "description": "List and filter repository pull requests",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Head"
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sort"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Direction"
+          },
+          "per_page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Per Page"
+          },
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "title": "list_pull_requests_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_pull_request_review",
+      "description": "Create a review on a pull request",
+      "parameters": {
+        "$defs": {
+          "create_pull_request_review_Input_comments_Item": {
+            "properties": {
+              "path": {
+                "title": "Path",
+                "type": "string"
+              },
+              "position": {
+                "title": "Position"
+              },
+              "body": {
+                "title": "Body",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "position",
+              "body"
+            ],
+            "title": "create_pull_request_review_Input_comments_Item",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          },
+          "commit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Commit Id"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "comments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/create_pull_request_review_Input_comments_Item"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Comments"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number",
+          "body",
+          "event"
+        ],
+        "title": "create_pull_request_review_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "merge_pull_request",
+      "description": "Merge a pull request",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          },
+          "commit_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Commit Title"
+          },
+          "commit_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Commit Message"
+          },
+          "merge_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merge Method"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "title": "merge_pull_request_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_pull_request_files",
+      "description": "Get the list of files changed in a pull request",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "title": "get_pull_request_files_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_pull_request_status",
+      "description": "Get the combined status of all status checks for a pull request",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "title": "get_pull_request_status_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_pull_request_branch",
+      "description": "Update a pull request branch with the latest changes from the base branch",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          },
+          "expected_head_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Head Sha"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "title": "update_pull_request_branch_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_pull_request_comments",
+      "description": "Get the review comments on a pull request",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "title": "get_pull_request_comments_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_pull_request_reviews",
+      "description": "Get the reviews on a pull request",
+      "parameters": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "pull_number": {
+            "title": "Pull Number"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "title": "get_pull_request_reviews_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "maps_geocode",
+      "description": "Convert an address into geographic coordinates",
+      "parameters": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "maps_geocode_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "maps_reverse_geocode",
+      "description": "Convert coordinates into an address",
+      "parameters": {
+        "properties": {
+          "latitude": {
+            "title": "Latitude"
+          },
+          "longitude": {
+            "title": "Longitude"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "maps_reverse_geocode_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "maps_elevation",
+      "description": "Get elevation data for locations on the earth",
+      "parameters": {
+        "$defs": {
+          "maps_elevation_Input_locations_Item": {
+            "properties": {
+              "latitude": {
+                "title": "Latitude"
+              },
+              "longitude": {
+                "title": "Longitude"
+              }
+            },
+            "required": [
+              "latitude",
+              "longitude"
+            ],
+            "title": "maps_elevation_Input_locations_Item",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "locations": {
+            "items": {
+              "$ref": "#/$defs/maps_elevation_Input_locations_Item"
+            },
+            "title": "Locations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "locations"
+        ],
+        "title": "maps_elevation_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "sequentialthinking",
+      "description": "A detailed tool for dynamic and reflective problem-solving through thoughts.\nThis tool helps analyze problems through a flexible thinking process that can adapt and evolve.\nEach thought can build on, question, or revise previous insights as understanding deepens.\n\nWhen to use this tool:\n- Breaking down complex problems into steps\n- Planning and design with room for revision\n- Analysis that might need course correction\n- Problems where the full scope might not be clear initially\n- Problems that require a multi-step solution\n- Tasks that need to maintain context over multiple steps\n- Situations where irrelevant information needs to be filtered out\n\nKey features:\n- You can adjust total_thoughts up or down as you progress\n- You can question or revise previous thoughts\n- You can add more thoughts even after reaching what seemed like the end\n- You can express uncertainty and explore alternative approaches\n- Not every thought needs to build linearly - you can branch or backtrack\n- Generates a solution hypothesis\n- Verifies the hypothesis based on the Chain of Thought steps\n- Repeats the process until satisfied\n- Provides a correct answer\n\nParameters explained:\n- thought: Your current thinking step, which can include:\n* Regular analytical steps\n* Revisions of previous thoughts\n* Questions about previous decisions\n* Realizations about needing more analysis\n* Changes in approach\n* Hypothesis generation\n* Hypothesis verification\n- next_thought_needed: True if you need more thinking, even if at what seemed like the end\n- thought_number: Current number in sequence (can go beyond initial total if needed)\n- total_thoughts: Current estimate of thoughts needed (can be adjusted up/down)\n- is_revision: A boolean indicating if this thought revises previous thinking\n- revises_thought: If is_revision is true, which thought number is being reconsidered\n- branch_from_thought: If branching, which thought number is the branching point\n- branch_id: Identifier for the current branch (if any)\n- needs_more_thoughts: If reaching end but realizing more thoughts needed\n\nYou should:\n1. Start with an initial estimate of needed thoughts, but be ready to adjust\n2. Feel free to question or revise previous thoughts\n3. Don't hesitate to add more thoughts if needed, even at the \"end\"\n4. Express uncertainty when present\n5. Mark thoughts that revise previous thinking or branch into new paths\n6. Ignore information that is irrelevant to the current step\n7. Generate a solution hypothesis when appropriate\n8. Verify the hypothesis based on the Chain of Thought steps\n9. Repeat the process until satisfied with the solution\n10. Provide a single, ideally correct answer as the final output\n11. Only set next_thought_needed to false when truly done and a satisfactory answer is reached",
+      "parameters": {
+        "properties": {
+          "thought": {
+            "title": "Thought",
+            "type": "string"
+          },
+          "nextThoughtNeeded": {
+            "title": "Nextthoughtneeded",
+            "type": "boolean"
+          },
+          "thoughtNumber": {
+            "title": "Thoughtnumber"
+          },
+          "totalThoughts": {
+            "title": "Totalthoughts"
+          },
+          "isRevision": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Isrevision"
+          },
+          "revisesThought": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Revisesthought"
+          },
+          "branchFromThought": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branchfromthought"
+          },
+          "branchId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branchid"
+          },
+          "needsMoreThoughts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Needsmorethoughts"
+          }
+        },
+        "required": [
+          "thought",
+          "nextThoughtNeeded",
+          "thoughtNumber",
+          "totalThoughts"
+        ],
+        "title": "sequentialthinking_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_list_channels",
+      "description": "List public channels in the workspace with pagination",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cursor"
+          }
+        },
+        "title": "slack_list_channels_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_post_message",
+      "description": "Post a new message to a Slack channel",
+      "parameters": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "text"
+        ],
+        "title": "slack_post_message_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_reply_to_thread",
+      "description": "Reply to a specific message thread in Slack",
+      "parameters": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "thread_ts": {
+            "title": "Thread Ts",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "thread_ts",
+          "text"
+        ],
+        "title": "slack_reply_to_thread_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_add_reaction",
+      "description": "Add a reaction emoji to a message",
+      "parameters": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "reaction": {
+            "title": "Reaction",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "timestamp",
+          "reaction"
+        ],
+        "title": "slack_add_reaction_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_get_channel_history",
+      "description": "Get recent messages from a channel",
+      "parameters": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit"
+          }
+        },
+        "required": [
+          "channel_id"
+        ],
+        "title": "slack_get_channel_history_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_get_thread_replies",
+      "description": "Get all replies in a message thread",
+      "parameters": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "thread_ts": {
+            "title": "Thread Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "thread_ts"
+        ],
+        "title": "slack_get_thread_replies_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_get_users",
+      "description": "Get a list of all users in the workspace with their basic profile information",
+      "parameters": {
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cursor"
+          },
+          "limit": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit"
+          }
+        },
+        "title": "slack_get_users_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "slack_get_user_profile",
+      "description": "Get detailed profile information for a specific user",
+      "parameters": {
+        "properties": {
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "slack_get_user_profile_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_drawing",
+      "description": "Create a new Excalidraw drawing",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "content"
+        ],
+        "title": "create_drawing_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_drawing",
+      "description": "Get an Excalidraw drawing by ID",
+      "parameters": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "get_drawing_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_drawing",
+      "description": "Update an Excalidraw drawing by ID",
+      "parameters": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "content"
+        ],
+        "title": "update_drawing_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_drawing",
+      "description": "Delete an Excalidraw drawing by ID",
+      "parameters": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "delete_drawing_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_drawings",
+      "description": "List all Excalidraw drawings",
+      "parameters": {
+        "properties": {
+          "page": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Page"
+          },
+          "perPage": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Perpage"
+          }
+        },
+        "title": "list_drawings_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "export_to_json",
+      "description": "Export an Excalidraw drawing to JSON",
+      "parameters": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "export_to_json_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read the complete contents of a file from the file system. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Only works within allowed directories.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "read_file_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_multiple_files",
+      "description": "Read the contents of multiple files simultaneously. This is more efficient than reading files one by one when you need to analyze or compare multiple files. Each file's content is returned with its path as a reference. Failed reads for individual files won't stop the entire operation. Only works within allowed directories.",
+      "parameters": {
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "title": "read_multiple_files_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "title": "write_file_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Make line-based edits to a text file. Each edit replaces exact line sequences with new content. Returns a git-style diff showing the changes made. Only works within allowed directories.",
+      "parameters": {
+        "$defs": {
+          "edit_file_Input_edits_Item": {
+            "properties": {
+              "oldText": {
+                "title": "Oldtext",
+                "type": "string"
+              },
+              "newText": {
+                "title": "Newtext",
+                "type": "string"
+              }
+            },
+            "required": [
+              "oldText",
+              "newText"
+            ],
+            "title": "edit_file_Input_edits_Item",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "edits": {
+            "items": {
+              "$ref": "#/$defs/edit_file_Input_edits_Item"
+            },
+            "title": "Edits",
+            "type": "array"
+          },
+          "dryRun": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Dryrun"
+          }
+        },
+        "required": [
+          "path",
+          "edits"
+        ],
+        "title": "edit_file_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_directory",
+      "description": "Create a new directory or ensure a directory exists. Can create multiple nested directories in one operation. If the directory already exists, this operation will succeed silently. Perfect for setting up directory structures for projects or ensuring required paths exist. Only works within allowed directories.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "create_directory_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_directory",
+      "description": "Get a detailed listing of all files and directories in a specified path. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is essential for understanding directory structure and finding specific files within a directory. Only works within allowed directories.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "list_directory_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "move_file",
+      "description": "Move or rename files and directories. Can move files between directories and rename them in a single operation. If the destination exists, the operation will fail. Works across different directories and can be used for simple renaming within the same directory. Both source and destination must be within allowed directories.",
+      "parameters": {
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "destination": {
+            "title": "Destination",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "title": "move_file_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_files",
+      "description": "Recursively search for files and directories matching a pattern. Searches through all subdirectories from the starting path. The search is case-insensitive and matches partial names. Returns full paths to all matching items. Great for finding files when you don't know their exact location. Only searches within allowed directories.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "pattern": {
+            "title": "Pattern",
+            "type": "string"
+          },
+          "excludePatterns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Excludepatterns"
+          }
+        },
+        "required": [
+          "path",
+          "pattern"
+        ],
+        "title": "search_files_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_objects",
+      "description": "Get objects from NetBox based on their type and filters.\n    Args:\n        netbox_client: An instance of AsyncNetBoxAPIClient.\n        object_type: String representing the NetBox object type (e.g., \"providers\", \"sites\", \"vlans\").\n        filters: dict of filters to apply to the API call.",
+      "parameters": {
+        "properties": {
+          "object_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Type"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filters"
+          }
+        },
+        "title": "get_objects_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_netbox",
+      "description": "Perform a global search across NetBox objects.\n    Args:\n        netbox_client: An instance of AsyncNetBoxAPIClient.\n        query: Search string to look for.\n        limit: Maximum number of results to return.",
+      "parameters": {
+        "properties": {
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Query"
+          },
+          "limit": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit"
+          }
+        },
+        "title": "search_netbox_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_object_by_id",
+      "description": "Get detailed information about a specific NetBox object by its ID.\n    Args:\n        netbox_client: An instance of AsyncNetBoxAPIClient.\n        object_type: String representing the NetBox object type.\n        object_id: The numeric ID of the object.",
+      "parameters": {
+        "properties": {
+          "object_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Type"
+          },
+          "object_id": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Object Id"
+          }
+        },
+        "title": "get_object_by_id_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search",
+      "description": "Search on Google for multiple keywords and return the results",
+      "parameters": {
+        "properties": {
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "limit": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit"
+          },
+          "timeout": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Timeout"
+          },
+          "noSaveState": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nosavestate"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Locale"
+          },
+          "debug": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Debug"
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "title": "search_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_servicenow_problem",
+      "description": "\ud83d\udea8 Use this to create a new ServiceNow problem. Only use when the user explicitly says to create a new problem ticket. Do NOT use this tool to update or retrieve existing problems.",
+      "parameters": {
+        "properties": {
+          "problem_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Problem Data"
+          }
+        },
+        "title": "create_servicenow_problem_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_servicenow_problem_sys_id",
+      "description": "\ud83d\udd0d Only use if the user provides a problem number and asks to fetch its ServiceNow sys_id. Do NOT use unless user explicitly asks to look up a problem by number.",
+      "parameters": {
+        "properties": {
+          "problem_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Problem Number"
+          }
+        },
+        "title": "get_servicenow_problem_sys_id_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_servicenow_problem_state",
+      "description": "\ud83d\udcca Only use if the user provides a sys_id and wants to check the current problem state. Do NOT use for new problem creation or general issue diagnosis.",
+      "parameters": {
+        "properties": {
+          "sys_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sys Id"
+          }
+        },
+        "title": "get_servicenow_problem_state_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_servicenow_problem_details",
+      "description": "\ud83d\udcc4 Use to get full JSON details of a specific problem, ONLY when the user gives a number. Not needed for general actions or new problem creation.",
+      "parameters": {
+        "properties": {
+          "problem_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Problem Number"
+          }
+        },
+        "title": "get_servicenow_problem_details_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_servicenow_problem",
+      "description": "\u270f\ufe0f Use this to update an existing problem in ServiceNow. Only use if the user asks to modify fields in a known problem by sys_id. NEVER use this when creating new problems.",
+      "parameters": {
+        "properties": {
+          "sys_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sys Id"
+          },
+          "update_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Update Data"
+          }
+        },
+        "title": "update_servicenow_problem_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "send-email",
+      "description": "\u53d1\u9001\u90ae\u4ef6",
+      "parameters": {
+        "properties": {
+          "to": {
+            "title": "To",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "text"
+        ],
+        "title": "send-email_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "ask_chatgpt",
+      "description": "Sends the provided text ('content') to an external ChatGPT (gpt-4o) model for analysis, summarization, comparison, or generation tasks. Use this ONLY when specifically asked to get ChatGPT's perspective or perform complex analysis beyond the primary assistant's capabilities (e.g., detailed security review of a config, summarizing a large document). Use this tool to augment your own AI capabilities as access to another external Large Language Model.",
+      "parameters": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "ask_chatgpt_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_chart",
+      "description": "Generate a chart using QuickChart",
+      "parameters": {
+        "$defs": {
+          "generate_chart_Input_datasets_Item": {
+            "properties": {
+              "label": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Label"
+              },
+              "backgroundColor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Backgroundcolor"
+              },
+              "borderColor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Bordercolor"
+              },
+              "additionalConfig": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Additionalconfig"
+              }
+            },
+            "title": "generate_chart_Input_datasets_Item",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Labels"
+          },
+          "datasets": {
+            "items": {
+              "$ref": "#/$defs/generate_chart_Input_datasets_Item"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Options"
+          }
+        },
+        "required": [
+          "type",
+          "datasets"
+        ],
+        "title": "generate_chart_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "download_chart",
+      "description": "Download a chart image to a local file",
+      "parameters": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "outputPath": {
+            "title": "Outputpath",
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "outputPath"
+        ],
+        "title": "download_chart_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "vegalite_save_data",
+      "description": "Save tabular data for future Vega-Lite visualizations. The data must be a list of dictionaries with consistent keys and values that are strings, numbers, or floats. For example: [{\"direction\": \"Input\", \"packets\": 1000}, {\"direction\": \"Output\", \"packets\": 1200}].",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "data"
+        ],
+        "title": "vegalite_save_data_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "vegalite_visualize_data",
+      "description": "Generate a Vega-Lite visualization from a previously saved dataset. Takes a valid Vega-Lite v5 specification (as a string) and automatically injects the saved data into the chart. Saves the output as a PNG to /output.",
+      "parameters": {
+        "properties": {
+          "data_name": {
+            "title": "Data Name",
+            "type": "string"
+          },
+          "vegalite_specification": {
+            "title": "Vegalite Specification",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_name",
+          "vegalite_specification"
+        ],
+        "title": "vegalite_visualize_data_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_mermaid_markdown",
+      "description": "Generate PNG image from mermaid markdown",
+      "parameters": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Theme"
+          },
+          "backgroundColor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Backgroundcolor"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "folder": {
+            "title": "Folder",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "folder"
+        ],
+        "title": "generate_mermaid_markdown_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_rfc",
+      "description": "Fetch an RFC document by its number",
+      "parameters": {
+        "properties": {
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Format"
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "title": "get_rfc_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_rfcs",
+      "description": "Search for RFCs by keyword",
+      "parameters": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Limit"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "search_rfcs_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_rfc_section",
+      "description": "Get a specific section from an RFC",
+      "parameters": {
+        "properties": {
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "section"
+        ],
+        "title": "get_rfc_section_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_cve",
+      "description": "Retrieves detailed information for a specific CVE ID from the NIST NVD.",
+      "parameters": {
+        "properties": {
+          "cve_id": {
+            "title": "Cve Id",
+            "type": "string"
+          },
+          "concise": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Concise"
+          }
+        },
+        "required": [
+          "cve_id"
+        ],
+        "title": "get_cve_Input",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_cve",
+      "description": "Searches the NIST NVD for CVEs based on a keyword.",
+      "parameters": {
+        "properties": {
+          "keyword": {
+            "title": "Keyword",
+            "type": "string"
+          },
+          "exact_match": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Exact Match"
+          },
+          "concise": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Concise"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Results"
+          }
+        },
+        "required": [
+          "keyword"
+        ],
+        "title": "search_cve_Input",
+        "type": "object"
+      }
+    }
+  ]
+}
