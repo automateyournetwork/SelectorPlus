@@ -9,7 +9,7 @@ import os
 # --- Environment Variables ---
 A2A_PORT = int(os.getenv("A2A_PORT", 10000))
 # Ensure LANGGRAPH_URL uses http:// if not otherwise specified
-langgraph_host = os.getenv("LANGGRAPH_HOST", "localhost:8000") # Example: Use separate host/port if needed
+LANGGRAPH_HOST = os.getenv("LANGGRAPH_HOST", "70.53.207.50:2024")
 LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", f"http://{langgraph_host}")
 AGENT_ID = os.getenv("AGENT_ID", "SelectorPlus") # Good practice to allow overriding agent ID
 AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/.well-known/agent.json") # Allow configuring agent card path
