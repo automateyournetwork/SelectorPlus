@@ -10,7 +10,7 @@ import os
 A2A_PORT = int(os.getenv("A2A_PORT", 10000))
 # Ensure LANGGRAPH_URL uses http:// if not otherwise specified
 langgraph_host = os.getenv("LANGGRAPH_HOST", "70.53.207.50:2024")
-LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", f"http://{langgraph_host}")
+LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", "http://host.docker.internal:2024")
 AGENT_ID = os.getenv("AGENT_ID", "SelectorPlus") # Good practice to allow overriding agent ID
 AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/.well-known/agent.json") # Allow configuring agent card path
 
