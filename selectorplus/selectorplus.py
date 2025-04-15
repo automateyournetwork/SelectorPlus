@@ -564,6 +564,7 @@ agent_card = {
 # Populate skills from your discovered tools
 for tool in valid_tools:
     skill = {
+        "id": tool.name,  # ✅ REQUIRED by the spec
         "name": tool.name,
         "description": tool.description or "No description provided.",
     }
