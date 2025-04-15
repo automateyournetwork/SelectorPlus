@@ -1,280 +1,255 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse # StreamingResponse is not used in this non-streaming approach
-from fastapi.staticfiles import StaticFiles
 import httpx
 import json
 import uuid
 import os
+import traceback
+from datetime import datetime # Import datetime for timestamp
+from fastapi import FastAPI, Request
+# Using JSONResponse as we will return standard JSON structure
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 # --- Environment Variables ---
 A2A_PORT = int(os.getenv("A2A_PORT", 10000))
-# Ensure LANGGRAPH_URL uses http:// if not otherwise specified
-LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", "http://localhost:2024")
-AGENT_ID = os.getenv("AGENT_ID", "SelectorPlus") # Good practice to allow overriding agent ID
-AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/.well-known/agent.json") # Allow configuring agent card path
+LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", "http://host.docker.internal:2024")
+AGENT_ID = os.getenv("AGENT_ID", "SelectorPlus")
+AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/.well-known/agent.json")
 
 app = FastAPI(
     title="LangGraph A2A Adapter",
-    description="Adapts LangGraph agent interactions to the A2A protocol.",
-    version="1.0.0",
+    description="Adapts LangGraph agent interactions to the A2A protocol (Conforming to common/types Task model).",
+    version="1.2.0", # Bump version
 )
 
-# In-memory storage for conversation_id -> thread_id mapping
-# For production, consider a more persistent store (e.g., Redis, DB)
 threads = {}
 
-# 👇 Serve the .well-known directory statically
 app.mount("/.well-known", StaticFiles(directory="/a2a/.well-known"), name="well-known")
 
 @app.get("/.well-known/agent.json", tags=["A2A Discovery"])
 async def agent_card():
-    """Serves the agent's capability description."""
+    # Returns standard JSON, no changes needed
     try:
         with open(AGENT_CARD_PATH) as f:
             content = json.load(f)
-            # Ensure the URL in the card reflects the actual service location if possible
-            # This might require dynamic generation or configuration management
-            # For now, we just serve the static file
             return JSONResponse(content=content)
     except FileNotFoundError:
         print(f"ERROR: Agent card not found at {AGENT_CARD_PATH}")
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Agent configuration file not found."}
-        )
+        return JSONResponse(status_code=404, content={"error": "Agent configuration file not found."})
     except json.JSONDecodeError:
         print(f"ERROR: Agent card at {AGENT_CARD_PATH} is not valid JSON.")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Agent configuration file is corrupted."}
-        )
+        return JSONResponse(status_code=500, content={"error": "Agent configuration file is corrupted."})
     except Exception as e:
         print(f"ERROR: Failed to serve agent card: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Internal server error serving agent card."}
-        )
+        return JSONResponse(status_code=500, content={"error": "Internal server error serving agent card."})
 
-@app.post("/tasks/send", tags=["A2A Task Execution"])
+
+@app.post("/", tags=["A2A Task Execution"])
 async def send_task(request: Request):
-    """Receives a task via A2A protocol and interacts with LangGraph."""
+    """
+    Receives task, interacts with LangGraph, returns standard JSONRPCResponse
+    with result conforming to the Task model from common/types.py.
+    The AI's final answer is placed in result.status.message.
+    """
+    task_param_id = None
+    request_id = None
+    conversation_id = None # Will be mapped to sessionId
+
+    # --- Basic Request Parsing and Validation ---
     try:
         payload = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse(
-            status_code=400,
-            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None}
-        )
+        print("🟡 Incoming Payload:", json.dumps(payload, indent=2))
+        request_id = payload.get("id")
+    except Exception as e:
+        print(f"ERROR: Failed to parse incoming request: {e}")
+        return JSONResponse(status_code=400, content={"jsonrpc": "2.0", "error": {"code": -32700, "message": f"Parse error: {e}"}, "id": request_id})
 
-    # --- Validate JSON-RPC Structure ---
-    if not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0" or "method" not in payload or "params" not in payload or "id" not in payload:
-         # Although A2A /tasks/send doesn't strictly enforce 'method', including it improves JSON-RPC adherence
-         # We'll assume method is implicitly 'send' for this endpoint
-         # Focusing on required params and id for A2A
-         if "params" not in payload or "id" not in payload:
-            return JSONResponse(
-                status_code=400,
-                content={"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request"}, "id": payload.get("id")}
-            )
+    if not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0" or "params" not in payload:
+         return JSONResponse(status_code=400, content={"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid Request: Missing 'params' or invalid structure"}, "id": request_id})
 
-    request_id = payload.get("id")
     params = payload.get("params", {})
-    message = params.get("content")
-    conversation_id = params.get("conversation_id", str(uuid.uuid4())) # Generate new conv ID if none provided
+    task_param_id = params.get("id") # ID of the task being sent
 
-    if not message:
+    # Use sessionId from input, or conversation_id, or generate new
+    session_id = params.get("sessionId") # Match the Task model field name
+    if not session_id:
+        session_id = params.get("conversation_id", str(uuid.uuid4().hex)) # Fallback
+
+    message_content = None
+    message_object = params.get("message")
+    if isinstance(message_object, dict):
+        message_parts = message_object.get("parts")
+        if isinstance(message_parts, list) and len(message_parts) > 0:
+            first_part = message_parts[0]
+            if isinstance(first_part, dict) and first_part.get("type") == "text":
+                message_content = first_part.get("text")
+
+    # Prepare failed status structure conforming to TaskStatus model
+    failed_status = {
+        "state": "failed", # Use the TaskState enum value string
+        "timestamp": datetime.now().isoformat() # Add timestamp
+        # message could be added here too for errors
+    }
+
+    if not message_content:
+        print(f"⚠️ Warning: Could not extract text message content for task {task_param_id}.")
+        failed_status["message"] = {"role": "agent", "parts": [{"type": "text", "text": "Invalid params: Missing or invalid 'message.parts[0].text'"}]}
         return JSONResponse(
             status_code=400,
-            content={"jsonrpc": "2.0", "error": {"code": -32602, "message": "Invalid params: 'content' is required"}, "id": request_id}
+            content={
+                "jsonrpc": "2.0",
+                "error": {"code": -32602, "message": "Invalid params: Missing or invalid 'message.parts[0].text'"},
+                 # Include result object matching Task model on error
+                "result": {"id": task_param_id, "status": failed_status, "sessionId": session_id, "artifacts": None, "history": None, "metadata": None},
+                "id": request_id
+            }
         )
 
-    print(f"Received task for conversation {conversation_id} (Request ID: {request_id})")
+    print(f"Received task {task_param_id} for session {session_id} (Request ID: {request_id})")
 
-    # --- Get or Create LangGraph Thread ---
-    thread_id = threads.get(conversation_id)
+    # --- Thread Management ---
+    # Use session_id for tracking LangGraph threads now
+    thread_id = threads.get(session_id)
     if not thread_id:
-        print(f"Creating new LangGraph thread for conversation {conversation_id}")
+        print(f"Creating new LangGraph thread for session {session_id}, task {task_param_id}")
         async with httpx.AsyncClient(base_url=LANGGRAPH_URL) as client:
             try:
-                # Note: Some LangGraph setups might not require assistant_id for thread creation
-                # Adjust the payload as needed based on your LangGraph server's requirements
-                thread_payload = {"assistant_id": AGENT_ID} if AGENT_ID else {} # Only send if AGENT_ID is set
-
-                response = await client.post("/threads", json=thread_payload, timeout=10.0)
-                response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-
+                thread_payload = {"assistant_id": AGENT_ID} if AGENT_ID else {}
+                response = await client.post("/threads", json=thread_payload, timeout=20.0)
+                response.raise_for_status()
                 thread_data = response.json()
                 thread_id = thread_data.get("thread_id")
-
                 if not thread_id:
-                     print(f"ERROR: LangGraph thread creation response missing 'thread_id'. Response: {thread_data}")
-                     return JSONResponse(
-                        status_code=500,
-                        content={"jsonrpc": "2.0", "error": {"code": -32000, "message": "LangGraph thread creation failed: Invalid response format"}, "id": request_id}
-                    )
-
-                threads[conversation_id] = thread_id
-                print(f"Created LangGraph thread {thread_id} for conversation {conversation_id}")
-
-            except httpx.RequestError as e:
-                print(f"ERROR: Could not connect to LangGraph at {LANGGRAPH_URL}/threads: {e}")
-                return JSONResponse(
-                    status_code=503, # Service Unavailable
-                    content={"jsonrpc": "2.0", "error": {"code": -32000, "message": f"LangGraph connection error: {e}"}, "id": request_id}
-                )
-            except httpx.HTTPStatusError as e:
-                print(f"ERROR: LangGraph thread creation failed with status {e.response.status_code}. Response: {e.response.text}")
-                return JSONResponse(
-                    status_code=500,
-                    content={"jsonrpc": "2.0", "error": {"code": -32000, "message": f"LangGraph thread creation failed (HTTP {e.response.status_code})"}, "id": request_id}
-                )
-            except Exception as e: # Catch other potential errors during thread creation
-                 print(f"ERROR: Unexpected error during LangGraph thread creation: {e}")
-                 return JSONResponse(
-                    status_code=500,
-                    content={"jsonrpc": "2.0", "error": {"code": -32000, "message": f"Internal server error during thread creation"}, "id": request_id}
-                )
+                     print(f"ERROR: LangGraph thread creation failed for task {task_param_id}.")
+                     failed_status["message"] = {"role": "agent", "parts": [{"type": "text", "text": "LangGraph thread creation failed: Invalid response format"}]}
+                     return JSONResponse(status_code=500, content={"jsonrpc": "2.0", "error": {"code": -32000, "message": "LangGraph thread creation failed: Invalid response format"}, "result": {"id": task_param_id, "status": failed_status, "sessionId": session_id, "artifacts": None, "history": None, "metadata": None}, "id": request_id})
+                threads[session_id] = thread_id # Store thread_id against session_id
+                print(f"Created LangGraph thread {thread_id} for session {session_id}, task {task_param_id}")
+            except Exception as e:
+                 error_msg = f"Error during LangGraph thread creation: {e}"
+                 print(f"ERROR: {error_msg} for task {task_param_id}")
+                 failed_status["message"] = {"role": "agent", "parts": [{"type": "text", "text": error_msg}]}
+                 # Determine appropriate status code based on error type if possible
+                 status_code = 503 if isinstance(e, httpx.RequestError) else 500
+                 return JSONResponse(status_code=status_code, content={"jsonrpc": "2.0", "error": {"code": -32000, "message": error_msg}, "result": {"id": task_param_id, "status": failed_status, "sessionId": session_id, "artifacts": None, "history": None, "metadata": None}, "id": request_id})
     else:
-         print(f"Using existing LangGraph thread {thread_id} for conversation {conversation_id}")
+         print(f"Using existing LangGraph thread {thread_id} for session {session_id}, task {task_param_id}")
 
 
     # --- Call LangGraph Run Stream Endpoint ---
-    async with httpx.AsyncClient(base_url=LANGGRAPH_URL) as client:
-        try:
-            langgraph_payload = {
-                "assistant_id": AGENT_ID, # May or may not be needed depending on LangGraph setup
-                "input": {"messages": [{"role": "user", "type": "human", "content": message}]} # Use 'role':'user' too for clarity if supported
-            }
-            # Remove assistant_id if not set
-            if not AGENT_ID:
-                del langgraph_payload["assistant_id"]
+    try:
+        async with httpx.AsyncClient(base_url=LANGGRAPH_URL) as client:
+            langgraph_payload = {"input": {"messages": [{"role": "user", "type": "human", "content": message_content}]}}
+            if AGENT_ID: langgraph_payload["assistant_id"] = AGENT_ID
 
-            print(f"Calling LangGraph: POST /threads/{thread_id}/runs/stream")
-            resp = await client.post(
-                f"/threads/{thread_id}/runs/stream",
-                json=langgraph_payload,
-                timeout=60.0 # Increased timeout for potentially long runs
-            )
-            resp.raise_for_status() # Check for HTTP errors
+            print(f"Calling LangGraph for task {task_param_id}: POST /threads/{thread_id}/runs/stream")
+            resp = await client.post(f"/threads/{thread_id}/runs/stream", json=langgraph_payload, timeout=90.0)
+            resp.raise_for_status()
 
             text = resp.text.strip()
-            print(f"🔥 Full LangGraph /runs/stream response for thread {thread_id}:")
-            print(text) # Log the raw stream data for debugging
+            # print(f"🔥 Full LangGraph stream response task {task_param_id}:\n{text}")
 
-            # --- Process Stream Data to Collect AI Responses ---
-            ai_responses = []
+            # --- Process Stream Data (same logic as before to find the final string) ---
+            final_response_content = None
             lines = text.split("\n")
             for line in lines:
-                line = line.strip() # Handle potential whitespace
+                line = line.strip()
                 if line.startswith("data:"):
                     try:
-                        # Handle potential empty data chunks like "data: \n"
-                        data_content = line[5:].strip()
-                        if not data_content:
-                            continue
+                        data_content = line[5:].strip();
+                        if not data_content: continue
+                        json_data = json.loads(data_content); current_content = None
+                        if isinstance(json_data, dict) and "content" in json_data and isinstance(json_data["content"], str) and json_data["content"].strip(): current_content = json_data["content"]
+                        elif isinstance(json_data, dict) and "content" in json_data and isinstance(json_data["content"], list) and len(json_data["content"]) > 0 and isinstance(json_data["content"][0], str) and json_data["content"][0].strip(): current_content = json_data["content"][0]
+                        elif isinstance(json_data, dict) and "messages" in json_data:
+                           for msg in reversed(json_data.get("messages", [])):
+                               is_ai = msg.get("type") == "ai" or msg.get("role") == "assistant";
+                               if is_ai and "content" in msg and isinstance(msg["content"], str) and msg["content"].strip(): current_content = msg["content"]; break
+                        elif isinstance(json_data, dict) and json_data.get("event") == "on_chat_model_stream":
+                             chunk = json_data.get("data", {}).get("chunk");
+                             if chunk and isinstance(chunk, dict) and "content" in chunk and chunk["content"].strip(): current_content = chunk["content"]
+                        if current_content: final_response_content = current_content
+                    except Exception as parse_err: print(f"⚠️ Warning [Task {task_param_id}]: Error processing stream line: '{line}'. Error: {parse_err}")
 
-                        json_data = json.loads(data_content)
 
-                        # LangGraph stream events can have different structures.
-                        # Common patterns include a top-level 'messages' list
-                        # or events related to specific nodes containing message data.
-                        # Adapt this logic based on your specific LangGraph output stream format.
+            # --- Format and Return SUCCESS Response CONFORMING TO Task MODEL ---
+            final_status_object = {
+                "state": "completed",
+                "timestamp": datetime.now().isoformat()
+            }
+            result_payload = {
+                 "id": task_param_id,
+                 "status": final_status_object,
+                 "sessionId": session_id, # Use the correct field name
+                 "artifacts": None,       # Explicitly include optional fields as None
+                 "history": None,
+                 "metadata": None
+             }
 
-                        # Example 1: Check for messages directly in the event data
-                        if isinstance(json_data, dict) and "messages" in json_data:
-                           for msg in json_data.get("messages", []):
-                               # Check for role 'assistant' or type 'ai'
-                               is_ai_message = msg.get("type") == "ai" or msg.get("role") == "assistant"
-                               if is_ai_message and "content" in msg and isinstance(msg["content"], str):
-                                    ai_responses.append(msg["content"])
-
-                        # Example 2: Check within node events (adjust node names as needed)
-                        elif isinstance(json_data, dict) and "event" in json_data and json_data["event"] == "on_chat_model_stream":
-                             chunk = json_data.get("data", {}).get("chunk")
-                             if chunk and isinstance(chunk, dict) and "content" in chunk:
-                                 # Check if it's from AI (might need more context depending on graph)
-                                 # This assumes any content in this event is AI response part
-                                 ai_responses.append(chunk["content"])
-
-                        # Add more parsing logic here if your stream structure is different
-
-                    except json.JSONDecodeError as json_err:
-                        print(f"⚠️ Warning: Could not decode JSON from stream line: '{line}'. Error: {json_err}")
-                        continue # Skip malformed lines
-                    except Exception as parse_err:
-                        print(f"⚠️ Warning: Error processing stream line: '{line}'. Error: {parse_err}")
-                        continue # Skip lines that cause other processing errors
-
-            # --- Format and Return Response ---
-            if ai_responses:
-                # Decide whether to join chunks or take the last one.
-                # Joining is often correct for LLM streams that output tokens sequentially.
-                final_response = "".join(ai_responses)
-                print(f"✅ Successfully processed stream for conversation {conversation_id}. Final Response Length: {len(final_response)}")
-                return JSONResponse(content={
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "response": final_response,
-                        "conversation_id": conversation_id
-                    },
-                    "id": request_id
-                })
+            if final_response_content:
+                print(f"✅ Successfully processed stream for task {task_param_id}. Placing answer in status.message.")
+                # Package final AI response into the status message
+                final_status_object["message"] = {
+                     "role": "agent",
+                     "parts": [{"type": "text", "text": final_response_content}]
+                }
             else:
-                # This case means the stream finished but no AI messages were found/extracted
-                print(f"⚠️ Warning: No AI messages found in LangGraph stream for conversation {conversation_id}.")
-                return JSONResponse(content={
-                    "jsonrpc": "2.0",
-                    "result": { # Still a successful call, just no AI output found
-                        "response": "No response content received from agent.", # Provide a clearer message
-                        "conversation_id": conversation_id
-                        },
-                    "id": request_id
-                })
+                print(f"⚠️ Warning [Task {task_param_id}]: No final AI message content captured. Sending default status message.")
+                # Include a default message in status if no specific AI response found
+                final_status_object["message"] = {
+                     "role": "agent",
+                     "parts": [{"type": "text", "text": "Agent processed the request but no text content was extracted from the final response."}]
+                }
 
-        except httpx.RequestError as e:
-             print(f"ERROR: Could not connect to LangGraph at {LANGGRAPH_URL}/threads/{thread_id}/runs/stream: {e}")
-             return JSONResponse(
-                status_code=503, # Service Unavailable
-                content={"jsonrpc": "2.0", "error": {"code": -32000, "message": f"LangGraph connection error during run: {e}"}, "id": request_id}
-            )
-        except httpx.HTTPStatusError as e:
-            print(f"ERROR: LangGraph run failed with status {e.response.status_code}. Response: {e.response.text}")
+            # Construct the final JSON-RPC response payload
+            response_payload_to_send = {
+                "jsonrpc": "2.0",
+                "result": result_payload, # The result object conforms to the Task model
+                "id": request_id
+            }
+
+            # Debug print the final payload
+            print(f"🔵 DEBUG: Adapter sending success payload (conforming to Task): {json.dumps(response_payload_to_send)}")
+            return JSONResponse(content=response_payload_to_send)
+
+    # --- Handle Exceptions during LangGraph RUN ---
+    # Return standard JSON-RPC errors, including result object where possible
+    except Exception as e:
+        error_message = f"Error during LangGraph run/processing: {e}"
+        error_code = -32000 # Internal error default
+        status_code = 500   # Internal error default
+
+        if isinstance(e, httpx.RequestError):
+            error_message = f"LangGraph connection error during run: {e}"
+            status_code = 503
+        elif isinstance(e, httpx.HTTPStatusError):
             error_message = f"LangGraph run failed (HTTP {e.response.status_code})"
-            try:
-                # Try to parse error details from LangGraph response
-                detail = e.response.json().get("detail", e.response.text)
-                error_message += f": {detail}"
-            except Exception:
-                 error_message += f": {e.response.text}" # Fallback to raw text
+            try: detail = e.response.json().get("detail", e.response.text); error_message += f": {detail}"
+            except Exception: error_message += f": {e.response.text}"
+            # status_code = e.response.status_code # Or keep 500? Let's keep 500 for internal failure indication
+        else:
+             traceback.print_exc() # Log unexpected errors fully
 
-            return JSONResponse(
-                status_code=500,
-                content={"jsonrpc": "2.0", "error": {"code": -32000, "message": error_message}, "id": request_id}
-            )
-        except Exception as e:
-            print(f"ERROR: Unexpected error during LangGraph run or response processing: {e}")
-            import traceback
-            traceback.print_exc() # Log the full traceback for debugging
-            return JSONResponse(
-                status_code=500,
-                content={"jsonrpc": "2.0", "error": {"code": -32000, "message": "Internal server error during agent execution"}, "id": request_id}
-            )
+        print(f"ERROR: {error_message} for task {task_param_id}")
+        failed_status["message"] = {"role": "agent", "parts": [{"type": "text", "text": error_message}]}
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "jsonrpc": "2.0",
+                "error": {"code": error_code, "message": error_message},
+                "result": {"id": task_param_id, "status": failed_status, "sessionId": session_id, "artifacts": None, "history": None, "metadata": None},
+                "id": request_id
+            }
+        )
 
-# --- Optional: Add root endpoint for health check ---
+# --- Health Check ---
 @app.get("/", tags=["Health Check"])
 async def read_root():
     return {"status": "A2A Adapter is running"}
 
-# --- Optional: Add command-line execution ---
+# --- Main Execution ---
 if __name__ == "__main__":
     import uvicorn
     print(f"Starting A2A Adapter on port {A2A_PORT}")
     print(f"Connecting to LangGraph at: {LANGGRAPH_URL}")
-    print(f"Using Agent ID: {AGENT_ID or 'Not Specified'}")
-    print(f"Serving Agent Card from: {AGENT_CARD_PATH}")
-    # Ensure the agent card file exists before starting
-    if not os.path.exists(AGENT_CARD_PATH):
-         print(f"\n!!! WARNING: Agent card file not found at {AGENT_CARD_PATH} !!!")
-         print("!!! The /.well-known/agent.json endpoint will return 404. !!!\n")
-
+    # ... (rest of main) ...
     uvicorn.run(app, host="0.0.0.0", port=A2A_PORT)
