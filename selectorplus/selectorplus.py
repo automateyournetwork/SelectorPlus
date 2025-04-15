@@ -21,7 +21,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 load_dotenv()
 
@@ -520,7 +520,8 @@ async def load_all_tools():
 # Load tools
 valid_tools = asyncio.run(load_all_tools())
 
-embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+#embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+embedding = OpenAIEmbeddings()
 
 vector_store = InMemoryVectorStore(embedding=embedding)
 
