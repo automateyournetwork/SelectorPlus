@@ -11,7 +11,7 @@ RUN echo "==> Installing Python3 and pip ...." \
   && apt-get update && apt-get install -y --fix-missing python3 python3-pip
 
 RUN echo "==> Install langchain requirements.." \
-  && pip install --break-system-packages -U --quiet langchain_experimental langchain langchain-community langchain_google_genai
+  && pip install --break-system-packages -U --quiet langchain_experimental langchain langchain-community langchain_google_genai langchain_openai
 
 RUN echo "==> Adding dotenv ..." \
   && pip install --break-system-packages python-dotenv

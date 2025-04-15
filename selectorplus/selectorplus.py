@@ -21,6 +21,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
@@ -587,8 +588,8 @@ print("DEBUG: Listing contents of AGENT_CARD_OUTPUT_DIR")
 print(os.listdir(AGENT_CARD_OUTPUT_DIR))
 print("DEBUG: Full absolute path check:", os.path.abspath(AGENT_CARD_PATH))
 
-
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
+#llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
+llm = ChatOpenAI(model_name="gpt-4o", temperature="0.1")
 
 llm_with_tools = llm.bind_tools(valid_tools)
 
