@@ -102,7 +102,7 @@ class SelectorClient:
 
             # Define the blocking part
             def _fetch_and_filter():
-                response = requests.get(self.base_url + SELECTOR_PHRASES, headers=self.headers, timeout=15)
+                response = requests.get(self.base_url + SELECTOR_PHRASES, headers=self.headers, timeout=30)
                 response.raise_for_status()
                 phrases = response.json()
                 if source_filter:
@@ -132,7 +132,7 @@ class SelectorClient:
         # This function now executes in a separate thread via run_in_executor
         try:
             # logger.debug(f"Executing POST to {url} in executor thread: {threading.current_thread().name}")
-            response = requests.post(url, headers=self.headers, json=payload, timeout=15)
+            response = requests.post(url, headers=self.headers, json=payload, timeout=30)
             response.raise_for_status()
             return {"status": "completed", "output": response.json()}
         except requests.exceptions.RequestException as re:

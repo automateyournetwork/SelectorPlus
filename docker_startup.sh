@@ -112,6 +112,10 @@ docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorpl
 if [ $? -ne 0 ]; then echo "Error building langgraph-selectorplus image."; exit 1; fi
 echo "langgraph-selectorplus image built successfully."
 
+echo "Building a2a-adapter image..."
+docker build -t a2a-adapter ./a2a
+echo "a2a-adapter image built successfully"
+
 #######
 #     #
 # RUN #
@@ -184,13 +188,13 @@ echo "quickchart-mcp container started."
 
 echo "Starting vegalite-mcp container..."
 docker run -dit --name vegalite-mcp \
-  -v "/home/johncapobianco/MCPyATS:/output" \
+  -v "/Users/johncapobianco/SelectorPlus:/output" \
   vegalite-mcp
 echo "vegalite-mcp container started."
 
 echo "Starting mermaid-mcp container..."
 docker run -dit --name mermaid-mcp \
-  -v "/home/johncapobianco/MCPyATS:/output" \
+  -v "/Users/johncapobianco/SelectorPlus:/output" \
   -e CONTENT_IMAGE_SUPPORTED=false \
   mermaid-mcp
 echo "mermaid-mcp container started."
@@ -221,17 +225,25 @@ if ! docker ps | grep -q "pyats-mcp"; then
     exit 1
 fi
 
-# Start langgraph container
-echo "Starting langgraph-selectorplus container..."
 docker run -p 2024:2024 -dit \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    --name langgraph-selectorplus \
-    langgraph-selectorplus
-echo "langgraph-selectorplus container started."
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(pwd)/a2a:/a2a \
+  -e AGENT_CARD_OUTPUT_DIR=/a2a/.well-known \
+  --name langgraph-selectorplus \
+  langgraph-selectorplus
 
-Start Streamlit front end
 echo "Starting streamlit-app container..."
 docker run -d --name streamlit-app -p 8501:8501 streamlit-app
 echo "streamlit-app container started at http://localhost:8501"
+
+sleep 10
+
+docker run -p 10000:10000 -dit \
+  --name a2a-adapter \
+  -v $(pwd)/a2a:/a2a \
+  --add-host=host.docker.internal:host-gateway \
+  -e LANGGRAPH_URL=http://host.docker.internal:2024 \
+  -e A2A_PORT=10000 \
+  a2a-adapter
 
 echo "All containers started."

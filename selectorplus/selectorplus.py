@@ -535,6 +535,59 @@ document_ids = vector_store.add_documents(tool_documents)
 
 print("🔧 All bound tools:", [t.name for t in valid_tools])
 
+
+AGENT_CARD_OUTPUT_DIR = os.getenv("AGENT_CARD_OUTPUT_DIR", "/a2a/.well-known")
+AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
+
+# Environment variables or defaults
+AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Plus Agent Enhanced with Model Context Protocol Toolkit")
+AGENT_DESCRIPTION = os.getenv("A2A_AGENT_DESCRIPTION", "LangGraph-based MCP agent for Selector AI and other MCPs.")
+AGENT_HOST = os.getenv("A2A_AGENT_HOST", "localhost")
+AGENT_PORT = os.getenv("A2A_AGENT_PORT", "10000")
+
+AGENT_URL = f"http://{AGENT_HOST}:{AGENT_PORT}"
+
+# ✅ Use standards-compliant fields
+agent_card = {
+    "name": AGENT_NAME,
+    "description": AGENT_DESCRIPTION,
+    "version": "1.0",
+    "url": AGENT_URL,
+    "capabilities": {
+        "a2a": True,
+        "tool-use": True,
+        "chat": True
+    },
+    "skills": []  
+}
+
+# Populate skills from your discovered tools
+for tool in valid_tools:
+    skill = {
+        "id": tool.name,  
+        "name": tool.name,
+        "description": tool.description or "No description provided.",
+    }
+
+    if hasattr(tool, "args_schema") and tool.args_schema:
+        try:
+            skill["parameters"] = tool.args_schema.schema()
+        except Exception:
+            skill["parameters"] = {"type": "object", "properties": {}}
+
+    agent_card["skills"].append(skill)
+
+os.makedirs(AGENT_CARD_OUTPUT_DIR, exist_ok=True)
+with open(AGENT_CARD_PATH, "w") as f:
+    json.dump(agent_card, f, indent=2)
+
+print(f"✅ A2A agent card written to {AGENT_CARD_PATH}")
+print(f"🌐 Agent is reachable at: {AGENT_URL}")
+print("DEBUG: Listing contents of AGENT_CARD_OUTPUT_DIR")
+print(os.listdir(AGENT_CARD_OUTPUT_DIR))
+print("DEBUG: Full absolute path check:", os.path.abspath(AGENT_CARD_PATH))
+
+
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
 
 llm_with_tools = llm.bind_tools(valid_tools)
@@ -807,7 +860,12 @@ GENERAL RULES:
 4. NEVER call a tool without all required parameters.
 5. NEVER call a tool just because the output of another tool suggests a next step — unless the user explicitly asked for that.
 
-✅ WHEN TO USE TOOLS:
+🔄 **AFTER A TOOL RUNS:**
+- When you receive information back from a tool in a `ToolMessage`, your **only** goal is to synthesize this information into a final, natural language answer for the user.
+- Present the key findings from the `ToolMessage` clearly and concisely.
+- **CRITICAL:** Do **NOT** repeat your decision to call the tool. Do **NOT** explain that you will use the tool again.
+- **CRITICAL:** Do **NOT** include `executable_code` blocks or `tool_code` blocks in your final synthesized answer to the user unless specifically asked to generate code. Focus on the natural language explanation.
+
 
 ✅ WHEN TO USE SELECTOR TOOLS:
 
@@ -845,8 +903,6 @@ GENERAL RULES:
 📐 DIAGRAMMING TOOLS:
 - Use `create_drawing`, `update_drawing`, `export_to_json` only when the user wants a network diagram or visual model.
 - Do NOT export a drawing unless the user explicitly says so.
-
-
 
 🧜 MERMAID DIAGRAM TOOLS:
 - Use `mermaid_generate` ONLY when the user asks to create a PNG image from **Mermaid diagram code**.
