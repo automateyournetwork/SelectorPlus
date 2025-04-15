@@ -229,6 +229,7 @@ docker run -p 2024:2024 -dit \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $(pwd)/a2a:/a2a \
   -e AGENT_CARD_OUTPUT_DIR=/a2a/.well-known \
+  --env-file .env \
   --name langgraph-selectorplus \
   langgraph-selectorplus
 
