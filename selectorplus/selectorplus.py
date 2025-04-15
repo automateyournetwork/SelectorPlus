@@ -553,18 +553,14 @@ agent_card = {
     "description": AGENT_DESCRIPTION,
     "version": "1.0",
     "url": AGENT_URL,
-    "capabilities": {
-        "a2a": True,
-        "tool-use": True,
-        "chat": True
-    },
-    "skills": []  # ✅ renamed from tools → skills
+    "capabilities": ["a2a", "tool-use", "chat"],
+    "skills": []  
 }
 
 # Populate skills from your discovered tools
 for tool in valid_tools:
     skill = {
-        "id": tool.name,  # ✅ REQUIRED by the spec
+        "id": tool.name,  
         "name": tool.name,
         "description": tool.description or "No description provided.",
     }
