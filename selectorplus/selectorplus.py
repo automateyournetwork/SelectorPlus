@@ -553,7 +553,11 @@ agent_card = {
     "description": AGENT_DESCRIPTION,
     "version": "1.0",
     "url": AGENT_URL,
-    "capabilities": ["a2a", "tool-use", "chat"],
+    "capabilities": {
+        "a2a": True,
+        "tool-use": True,
+        "chat": True
+    },
     "skills": []  
 }
 
