@@ -7,7 +7,6 @@ WORKDIR /app
 # Install dependencies
 COPY requirements.txt .
 COPY a2a_adapter.py .
-COPY .well-known .well-known
 
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -11,8 +11,8 @@ A2A_PORT = int(os.getenv("A2A_PORT", 10000))
 # Ensure LANGGRAPH_URL uses http:// if not otherwise specified
 langgraph_host = os.getenv("LANGGRAPH_HOST", "localhost:8000") # Example: Use separate host/port if needed
 LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", f"http://{langgraph_host}")
-AGENT_ID = os.getenv("AGENT_ID", "MCpyATS") # Good practice to allow overriding agent ID
-AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/agent.json") # Allow configuring agent card path
+AGENT_ID = os.getenv("AGENT_ID", "SelectorPlus") # Good practice to allow overriding agent ID
+AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/.well-known/agent.json") # Allow configuring agent card path
 
 app = FastAPI(
     title="LangGraph A2A Adapter",
@@ -25,8 +25,7 @@ app = FastAPI(
 threads = {}
 
 # 👇 Serve the .well-known directory statically
-app.mount("/.well-known", StaticFiles(directory="/.well-known"), name="well-known")
-
+app.mount("/.well-known", StaticFiles(directory="/a2a/.well-known"), name="well-known")
 
 @app.get("/.well-known/agent.json", tags=["A2A Discovery"])
 async def agent_card():

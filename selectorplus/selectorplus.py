@@ -535,7 +535,8 @@ document_ids = vector_store.add_documents(tool_documents)
 
 print("🔧 All bound tools:", [t.name for t in valid_tools])
 
-AGENT_CARD_OUTPUT_DIR = "/a2a/.well-known"
+
+AGENT_CARD_OUTPUT_DIR = os.getenv("AGENT_CARD_OUTPUT_DIR", "/a2a/.well-known")
 AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
 
 AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Plus Agent Enhanced with Model Context Protocol Toolkit")
@@ -570,12 +571,22 @@ for tool in valid_tools:
 
     agent_card["tools"].append(tool_info)
 
-os.makedirs(AGENT_CARD_OUTPUT_DIR, exist_ok=True)
+try:
+    os.makedirs(AGENT_CARD_OUTPUT_DIR, exist_ok=True)
+    print(f"✅ Created directory: {AGENT_CARD_OUTPUT_DIR}")
+except Exception as e:
+    print(f"❌ Failed to create directory {AGENT_CARD_OUTPUT_DIR}: {e}")
+    raise
+
 with open(AGENT_CARD_PATH, "w") as f:
     json.dump(agent_card, f, indent=2)
 
 print(f"✅ A2A agent card written to {AGENT_CARD_PATH}")
 print(f"🌐 Agent is reachable at: {AGENT_URL}")
+print("DEBUG: Listing contents of AGENT_CARD_OUTPUT_DIR")
+print(os.listdir(AGENT_CARD_OUTPUT_DIR))
+print("DEBUG: Full absolute path check:", os.path.abspath(AGENT_CARD_PATH))
+
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
 
