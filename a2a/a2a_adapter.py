@@ -241,6 +241,95 @@ async def send_task(request: Request):
             }
         )
 
+
+async def discover_agent(agent_url: str) -> dict | None:
+    """Fetch another agent's card from the /.well-known/ endpoint."""
+
+    # Strip invisible characters (like U+200B, U+2060, etc.)
+    agent_url = re.sub(r"[\u200B-\u200F\u2060-\u206F]", "", agent_url.strip())
+
+    # First ensure the URL has a protocol
+    if not (agent_url.startswith("http://") or agent_url.startswith("https://")):
+        agent_url = "http://" + agent_url
+
+    # Then ensure it ends with the correct path
+    if not agent_url.endswith("/.well-known/agent.json"):
+        agent_url = agent_url.rstrip("/") + "/.well-known/agent.json"
+
+    try:
+        print(f"🔍 Discovering agent at {agent_url}")
+        resp = await httpx.AsyncClient().get(agent_url, timeout=10.0)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"❌ Failed to discover agent at {agent_url}: {e}")
+        return None
+
+
+async def send_message_to_agent(agent_card: dict, content: str, session_id: str | None = None):
+    """Send a standard A2A message to another agent conforming to Google A2A Task model."""
+    endpoint = agent_card.get("methods", {}).get("send")
+    if not endpoint:
+        base_url = agent_card.get("endpoint", "").rstrip("/")
+        if not base_url:
+            print("❌ Error: No endpoint found in agent card")
+            return None
+            
+        # Fix: More robust protocol checking and addition
+        if not (base_url.startswith("http://") or base_url.startswith("https://")):
+            base_url = "http://" + base_url
+        endpoint = base_url + "/"
+    
+    # Additional check to ensure endpoint has a protocol
+    if not (endpoint.startswith("http://") or endpoint.startswith("https://")):
+        endpoint = "http://" + endpoint
+
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "send",
+        "params": {
+            "id": str(uuid.uuid4()),
+            "sessionId": session_id or str(uuid.uuid4()),
+            "message": {
+                "role": "user",
+                "parts": [{"type": "text", "text": content}]
+            }
+        },
+        "id": str(uuid.uuid4())
+    }
+
+    try:
+        print(f"📨 Sending message to {endpoint}: {content}")
+        resp = await httpx.AsyncClient().post(endpoint, json=payload, timeout=20.0)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"❌ Failed to send message to agent: {e}")
+        return None
+
+
+@app.post("/send_to_peer", tags=["Agent Communication"])
+async def send_to_peer(request: Request):
+    """
+    Sends a message to another public A2A agent using discovery + A2A Task model.
+    Expects JSON with 'agent_url' and 'message'.
+    """
+    try:
+        data = await request.json()
+        agent_url = data["agent_url"]
+        message = data["message"]
+        session_id = data.get("session_id")  # Optional
+
+        agent_card = await discover_agent(agent_url)
+        if not agent_card:
+            return JSONResponse(status_code=400, content={"error": "Agent discovery failed."})
+
+        response = await send_message_to_agent(agent_card, message, session_id=session_id)
+        return JSONResponse(content=response)
+    except Exception as e:
+        print(f"ERROR in /send_to_peer: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Internal error: {e}"})
+
 # --- Health Check ---
 @app.get("/", tags=["Health Check"])
 async def read_root():
