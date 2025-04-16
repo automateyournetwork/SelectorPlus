@@ -252,7 +252,24 @@ class MCPToolDiscovery:
         command_list = ["docker", "exec", "-i", self.container_name] + self.command
 
         try:
-            normalized_args = arguments.copy() # Avoid modifying original dict
+            try:
+                if isinstance(arguments, str):
+                    arguments = json.loads(arguments)
+
+                # 🔧 Unwrap __arg1 if it's a stringified JSON object
+                if "__arg1" in arguments:
+                    try:
+                        unwrapped = json.loads(arguments["__arg1"])
+                        if isinstance(unwrapped, dict):
+                            arguments = unwrapped
+                    except json.JSONDecodeError as e:
+                        logger.error("Failed to parse '__arg1' as JSON", exc_info=True)
+                        raise ValueError("Malformed __arg1 argument") from e
+
+                normalized_args = arguments.copy()
+            except Exception as e:
+                logger.error(f"Error normalizing arguments: {e}")
+                raise
 
             # Handle specific cases if necessary (like the 'sha' key)
             if tool_name == "create_or_update_file" and "sha" in normalized_args and normalized_args["sha"] is None:
@@ -324,11 +341,25 @@ class MCPToolDiscovery:
 
 # Add these helper functions somewhere *before* get_tools_for_service in selectorplus.py
 # --- Base async functions OUTSIDE the loop ---
-async def _base_mcp_call(tool_name_to_call: str, service_discovery_instance: MCPToolDiscovery, args_dict: dict):
+async def _base_mcp_call(tool_name_to_call: str, service_discovery_instance: MCPToolDiscovery, args_dict: Union[str, dict]):
     """Generic async function to call an MCP tool."""
     logger.info(f"PARTIAL_TRACE: _base_mcp_call invoked for '{tool_name_to_call}' with args {args_dict}")
-    # Directly call the instance method
+
+    # 🛡️ Ensure it's a dict
+    try:
+        if isinstance(args_dict, str):
+            args_dict = json.loads(args_dict)
+    except Exception as e:
+        logger.error(f"❌ Failed to parse args_dict string as JSON: {e}")
+        return json.dumps({"status": "error", "error": f"Invalid input: {e}"})
+
+    # ✅ Normalize for send-email
+    if tool_name_to_call == "send-email":
+        if "body" in args_dict and "text" not in args_dict:
+            args_dict["text"] = args_dict.pop("body")
+
     return await service_discovery_instance.call_tool(tool_name_to_call, args_dict)
+
 
 async def _structured_mcp_call(tool_name_to_call: str, service_discovery_instance: MCPToolDiscovery, pydantic_model: type[BaseModel], **kwargs):
     """Generic async function for structured MCP tools with Pydantic validation."""
@@ -654,6 +685,11 @@ class ContextAwareToolNode(ToolNode):
 
             tool_name = tool_call['name'] # Use dictionary access now that we know it's dict-like
             tool_args = tool_call['args']
+            # Normalize tool arguments for known patterns
+            if tool_name == "send-email":
+               # Normalize 'body' to 'text'
+               if "body" in tool_args and "text" not in tool_args:
+                   tool_args["text"] = tool_args.pop("body")
             tool_id = tool_call['id']
             logger.info(f"     Tool Name: {tool_name}")
             logger.debug(f"     Tool Args: {tool_args}")
