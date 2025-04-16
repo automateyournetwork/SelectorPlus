@@ -586,12 +586,16 @@ agent_card = {
     "description": AGENT_DESCRIPTION,
     "version": "1.0",
     "url": AGENT_URL,
+    "endpoint": AGENT_URL,  # ✅ Essential for downstream routing
+    "methods": {
+        "send": f"{AGENT_URL}/"  # ✅ A2A-compatible 'send' route
+    },
     "capabilities": {
         "a2a": True,
         "tool-use": True,
         "chat": True
     },
-    "skills": []  
+    "skills": []
 }
 
 # Populate skills from your discovered tools
