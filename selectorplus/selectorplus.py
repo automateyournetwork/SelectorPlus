@@ -1,5 +1,7 @@
 import os
 import json
+import httpx
+import uuid
 import asyncio
 import inspect
 import logging
@@ -529,6 +531,11 @@ async def load_all_tools():
                 all_tools.extend(tools_list)
         all_tools.extend(local_tools)
 
+        # *** ADD THE NEW DELEGATION TOOL ***
+        all_tools.append(a2a_delegation_tool)
+        logger.info(f"✅ Added A2A Delegation Tool: {a2a_delegation_tool.name}")
+        # *** END ADDITION ***
+
         print("🔧 Comprehensive Tool Discovery Results:")
         print("✅ All Discovered Tools:", [t.name for t in all_tools])
 
@@ -887,6 +894,100 @@ Consider these guidelines:
         "context": context
     }
 
+# Define the input schema for the delegation tool
+class DelegateToPeerSchema(BaseModel):
+    peer_agent_url: str = Field(description="The base URL of the peer A2A agent to contact (e.g., http://agent2.example.com:10001).")
+    task_description: str = Field(description="The specific task or question to send to the peer agent.")
+    session_id: Optional[str] = Field(default=None, description="Optional session ID to maintain conversation context.")
+
+# Define the asynchronous function for the tool
+async def delegate_task_to_peer_agent(peer_agent_url: str, task_description: str, session_id: Optional[str] = None) -> str:
+    """
+    Sends a task to a peer A2A agent and returns its text response or an error message.
+    Uses the standard A2A Task model for communication.
+    """
+    logger.info(f"Attempting to delegate task to peer: {peer_agent_url}")
+    
+    # Basic URL cleanup and ensure protocol
+    peer_agent_url = peer_agent_url.strip().rstrip("/")
+    if not (peer_agent_url.startswith("http://") or peer_agent_url.startswith("https://")):
+         peer_agent_url = "http://" + peer_agent_url
+    
+    # Assume the main endpoint is at '/' relative to the base URL
+    endpoint = f"{peer_agent_url}/" 
+    
+    request_id = str(uuid.uuid4())
+    task_param_id = str(uuid.uuid4())
+    current_session_id = session_id or str(uuid.uuid4())
+
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "tasks/send", # Standard A2A method
+        "params": {
+            "id": task_param_id,
+            "sessionId": current_session_id,
+            "message": {
+                "role": "user",
+                "parts": [{"type": "text", "text": task_description}]
+            },
+            "acceptedOutputModes": ["text"] # Specify desired output
+            # Add other params like historyLength if needed
+        },
+        "id": request_id
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            logger.info(f"Sending A2A task to {endpoint}: {json.dumps(payload)}")
+            resp = await client.post(endpoint, json=payload, timeout=60.0) # Increased timeout
+            resp.raise_for_status() # Raise exception for 4xx/5xx errors
+
+            response_data = resp.json()
+            logger.info(f"Received A2A response from {peer_agent_url}: {json.dumps(response_data)}")
+
+            # Extract the result according to the A2A Task model
+            result = response_data.get("result")
+            if not result:
+                return f"Error: Peer agent response missing 'result' field. Raw: {json.dumps(response_data)}"
+
+            status = result.get("status")
+            if not status:
+                 return f"Error: Peer agent result missing 'status' field. Raw: {json.dumps(response_data)}"
+
+            if status.get("state") == "failed":
+                 error_message = status.get("message", {}).get("parts", [{}])[0].get("text", "Unknown error")
+                 return f"Error: Peer agent failed task: {error_message}"
+
+            # Try to get the text response
+            response_message = status.get("message", {}).get("parts", [{}])[0].get("text")
+            if response_message:
+                return response_message
+            else:
+                # Handle cases where response might be elsewhere or missing
+                logger.warning(f"Could not extract text response from peer agent's successful status. Raw: {json.dumps(response_data)}")
+                # Fallback: return the whole result status as string
+                return f"Peer agent completed task, but no standard text response found. Status: {json.dumps(status)}"
+
+    except httpx.RequestError as e:
+        logger.error(f"Network error delegating task to {peer_agent_url}: {e}")
+        return f"Error: Network error connecting to peer agent {peer_agent_url}: {e}"
+    except httpx.HTTPStatusError as e:
+         logger.error(f"HTTP error delegating task to {peer_agent_url}: Status {e.response.status_code}, Response: {e.response.text}")
+         return f"Error: Peer agent {peer_agent_url} returned HTTP status {e.response.status_code}. Response: {e.response.text}"
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to decode JSON response from {peer_agent_url}: {e}. Response text: {resp.text}")
+        return f"Error: Could not decode JSON response from peer agent {peer_agent_url}."
+    except Exception as e:
+        logger.error(f"Unexpected error delegating task to {peer_agent_url}", exc_info=True)
+        return f"Error: An unexpected error occurred while delegating: {e}"
+
+# Create the StructuredTool instance
+a2a_delegation_tool = StructuredTool.from_function(
+    name="delegate_task_to_peer_agent",
+    description="Sends a specific task or question to another A2A-compatible agent at a given URL and returns its response. Use this when you lack the capability locally or are explicitly asked to consult another agent.",
+    args_schema=DelegateToPeerSchema,
+    coroutine=delegate_task_to_peer_agent # Use the async function
+)
 
 system_msg = """You are a computer networking expert at the CCIE level. You are a precise and helpful assistant with access to a wide range of tools for networking, GitHub automation, Slack notifications, file system operations, and ServiceNow ticketing. You must follow strict guidelines before choosing and using tools.
 
@@ -1052,6 +1153,17 @@ GENERAL RULES:
 - Pause and explain your thought process.
 - Say WHY the tool youre selecting is the best fit.
 - If unsure, respond with a clarification question instead of calling a tool.
+
+🤝 A2A PEER AGENT DELEGATION TOOL:
+- Use the `delegate_task_to_peer_agent` tool ONLY in the following situations:
+    1. You determine you lack the necessary local tool to fulfill a specific user request (e.g., asked about a system you don't manage).
+    2. A local tool execution fails with an error indicating the target is not found or not managed by this agent.
+    3. The user explicitly asks you to consult or delegate the task to another specific agent.
+- **Required Parameters:**
+    - `peer_agent_url`: The full base URL of the agent to contact (e.g., "http://agent2-hostname:10001"). You might need to ask the user for this if it's not obvious or provided. **Known Peer Agents: [List known peer agent URLs here if applicable, e.g., Agent2 at http://<agent2-ip-or-hostname>:<port>]**
+    - `task_description`: The precise question or task description to send to the peer agent. Usually, this will be the relevant part of the user's original request.
+- **Example:** If the user asks "Ask selector device health for device S3" and your local `pyATS_...` tool fails because S3 is unknown, you should explain this and then call `delegate_task_to_peer_agent` with `peer_agent_url='http://<agent2_url>'` and `task_description='Ask selector device health for device S3'`.
+- **DO NOT** use this tool for tasks you *can* perform locally.
 
 """
 
