@@ -663,6 +663,23 @@ embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 vector_store = InMemoryVectorStore(embedding=embedding)
 
+A2A_PEER_AGENTS = os.getenv("A2A_PEER_AGENTS", "").split(",")
+peer_agents = {}
+
+async def discover_peers():
+    for url in A2A_PEER_AGENTS:
+        url = url.strip()
+        if not url:
+            continue
+        agent = await discover_agent(url)
+        if agent:
+            peer_agents[url] = agent
+            print(f"✅ Discovered: {url}")
+        else:
+            print(f"⚠️ Failed: {url}")
+
+asyncio.run(discover_peers())
+
 async def load_delegated_tools(peer_agents: dict) -> List[StructuredTool]:
     delegated = []
 
