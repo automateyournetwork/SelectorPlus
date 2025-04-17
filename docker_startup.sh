@@ -228,6 +228,7 @@ docker run -d \
 docker run -p 10000:10000 -dit \
   --name a2a-adapter \
   -v $(pwd)/a2a:/a2a \
+  --env-file .env \
   --add-host=host.docker.internal:host-gateway \
   -e LANGGRAPH_URL=http://host.docker.internal:2024 \
   -e A2A_PORT=10000 \
