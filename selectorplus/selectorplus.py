@@ -727,8 +727,10 @@ async def load_delegated_tools(peer_agents: dict) -> List[StructuredTool]:
 # Load delegated tools from peer agents
 delegated_tools = asyncio.run(load_delegated_tools(peer_agents))
 
+valid_tools.extend(delegated_tools)
+
 # Combine all tools
-all_tools = valid_tools + delegated_tools
+all_tools = valid_tools
 
 
 tool_documents = [
