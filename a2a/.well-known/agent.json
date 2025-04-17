@@ -1,0 +1,159 @@
+{
+  "name": "Selector Plus Agent Enhanced with Model Context Protocol Toolkit",
+  "description": "LangGraph-based MCP agent for Selector AI and other MCPs.",
+  "version": "1.0",
+  "url": "http://70.53.207.50:10000",
+  "endpoint": "http://70.53.207.50:10000",
+  "methods": {
+    "send": "http://70.53.207.50:10000/"
+  },
+  "capabilities": {
+    "a2a": true,
+    "tool-use": true,
+    "chat": true
+  },
+  "skills": [
+    {
+      "id": "ask_selector",
+      "name": "ask_selector",
+      "description": "Use this primary tool to ask general questions or give instructions to the Selector AI Assistant in natural language (e.g., 'show me device health', 'what are the top alerts?', 'summarize network status'). It interacts with the Selector Chat/Copilot API to understand intent, provide insights, or potentially execute actions. This is the default tool for most user requests unless they explicitly ask for specific raw query data or a list of phrases.",
+      "parameters": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "selector_mcp_ask_selector_Input",
+        "type": "object"
+      }
+    },
+    {
+      "id": "query_selector",
+      "name": "query_selector",
+      "description": "Executes a specific, pre-defined Selector query command string (usually starting with '#') directly against the Selector Query API to retrieve structured, raw data. Use ONLY when the user provides an exact query command string. Do NOT use for general questions.",
+      "parameters": {
+        "properties": {
+          "command": {
+            "title": "Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "selector_mcp_query_selector_Input",
+        "type": "object"
+      }
+    },
+    {
+      "id": "get_selector_phrases",
+      "name": "get_selector_phrases",
+      "description": "Retrieves the list of saved Natural Language Phrases (aliases/shortcuts) registered in the Selector system. Use ONLY when the user explicitly asks to 'list phrases', 'show aliases', 'get commands', or similar requests for the list itself. Do NOT use this to execute a phrase or ask a general question.",
+      "parameters": {
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source"
+          }
+        },
+        "title": "selector_mcp_get_selector_phrases_Input",
+        "type": "object"
+      }
+    },
+    {
+      "id": "ping_tool",
+      "name": "ping_tool",
+      "description": "Performs a ping request to check if an IP is reachable and measures latency."
+    },
+    {
+      "id": "traceroute_tool",
+      "name": "traceroute_tool",
+      "description": "Performs an ICMP traceroute to analyze the network path to an IP and returns a structured response."
+    },
+    {
+      "id": "curl_lookup_tool",
+      "name": "curl_lookup_tool",
+      "description": "Performs a cURL request to check if an IP is serving a website and returns a human-readable HTTP response."
+    },
+    {
+      "id": "get_location_tool",
+      "name": "get_location_tool",
+      "description": "Fetches geographic location details for a public IP and returns a formatted response."
+    },
+    {
+      "id": "dig_tool",
+      "name": "dig_tool",
+      "description": "Performs a DNS reverse lookup (PTR record) for a given IP address."
+    },
+    {
+      "id": "nslookup_tool",
+      "name": "nslookup_tool",
+      "description": "Performs a reverse DNS lookup on an IP and returns a human-readable response."
+    },
+    {
+      "id": "bgp_lookup_tool",
+      "name": "bgp_lookup_tool",
+      "description": "Queries BGPView API for ASN and routing information of an IP address."
+    },
+    {
+      "id": "threat_check_tool",
+      "name": "threat_check_tool",
+      "description": "Checks if an IP is blacklisted or has a poor reputation score using AbuseIPDB and returns a formatted response."
+    },
+    {
+      "id": "whois_tool",
+      "name": "whois_tool",
+      "description": "Performs a WHOIS lookup on an IP and extracts organization, network range, country, and ASN details in a readable format."
+    },
+    {
+      "id": "delegate_task_to_peer_agent",
+      "name": "delegate_task_to_peer_agent",
+      "description": "Sends a specific task or question to another A2A-compatible agent at a given URL and returns its response. Use this when you lack the capability locally or are explicitly asked to consult another agent.",
+      "parameters": {
+        "properties": {
+          "peer_agent_url": {
+            "description": "The base URL of the peer A2A agent to contact (e.g., http://agent2.example.com:10001).",
+            "title": "Peer Agent Url",
+            "type": "string"
+          },
+          "task_description": {
+            "description": "The specific task or question to send to the peer agent.",
+            "title": "Task Description",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional session ID to maintain conversation context.",
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "peer_agent_url",
+          "task_description"
+        ],
+        "title": "DelegateToPeerSchema",
+        "type": "object"
+      }
+    }
+  ]
+}
