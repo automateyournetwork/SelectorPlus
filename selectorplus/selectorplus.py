@@ -663,17 +663,6 @@ embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 vector_store = InMemoryVectorStore(embedding=embedding)
 
-# Make sure peer_agents is populated globally at this point
-peer_agents_path = os.getenv("PEER_AGENTS_PATH", "./peer_agents.json")
-
-try:
-    with open(peer_agents_path, "r") as f:
-        peer_agents = json.load(f)
-    print(f"✅ Loaded {len(peer_agents)} peer agents from {peer_agents_path}")
-except Exception as e:
-    print(f"⚠️ Could not load peer agents from {peer_agents_path}: {e}")
-    peer_agents = {}
-
 async def load_delegated_tools(peer_agents: dict) -> List[StructuredTool]:
     delegated = []
 
