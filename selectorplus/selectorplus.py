@@ -24,7 +24,6 @@ from langgraph.prebuilt.tool_node import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from a2a.a2a_adapter import discover_agent
 
 A2A_PEER_AGENTS = os.getenv("A2A_PEER_AGENTS", "").split(",")
 
@@ -578,6 +577,38 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
 
     return tools
 
+async def discover_agent(url: str) -> Optional[dict]:
+    """
+    Discovers metadata from a peer agent by fetching its /.well-known/agent.json file.
+
+    Args:
+        url (str): Base URL of the peer agent, e.g. http://agent2:10001
+
+    Returns:
+        dict: The parsed agent metadata if successful, or None if not.
+    """
+    cleaned_url = url.strip().rstrip("/")
+    if not cleaned_url.startswith("http://") and not cleaned_url.startswith("https://"):
+        cleaned_url = "http://" + cleaned_url
+
+    discovery_url = f"{cleaned_url}/.well-known/agent.json"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(discovery_url, timeout=10.0)
+            response.raise_for_status()
+            agent_data = response.json()
+            return agent_data
+    except httpx.RequestError as e:
+        logger.error(f"Network error discovering peer agent at {discovery_url}: {e}")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error {e.response.status_code} when accessing {discovery_url}: {e.response.text}")
+    except json.JSONDecodeError:
+        logger.error(f"Failed to decode JSON from {discovery_url}")
+    except Exception as e:
+        logger.error(f"Unexpected error discovering peer agent at {discovery_url}: {e}", exc_info=True)
+
+    return None
 
 async def load_all_tools():
     """Async function to load tools from different MCP services and local files."""
