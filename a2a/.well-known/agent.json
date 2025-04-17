@@ -73,51 +73,6 @@
       }
     },
     {
-      "id": "ping_tool",
-      "name": "ping_tool",
-      "description": "Performs a ping request to check if an IP is reachable and measures latency."
-    },
-    {
-      "id": "traceroute_tool",
-      "name": "traceroute_tool",
-      "description": "Performs an ICMP traceroute to analyze the network path to an IP and returns a structured response."
-    },
-    {
-      "id": "curl_lookup_tool",
-      "name": "curl_lookup_tool",
-      "description": "Performs a cURL request to check if an IP is serving a website and returns a human-readable HTTP response."
-    },
-    {
-      "id": "get_location_tool",
-      "name": "get_location_tool",
-      "description": "Fetches geographic location details for a public IP and returns a formatted response."
-    },
-    {
-      "id": "dig_tool",
-      "name": "dig_tool",
-      "description": "Performs a DNS reverse lookup (PTR record) for a given IP address."
-    },
-    {
-      "id": "nslookup_tool",
-      "name": "nslookup_tool",
-      "description": "Performs a reverse DNS lookup on an IP and returns a human-readable response."
-    },
-    {
-      "id": "bgp_lookup_tool",
-      "name": "bgp_lookup_tool",
-      "description": "Queries BGPView API for ASN and routing information of an IP address."
-    },
-    {
-      "id": "threat_check_tool",
-      "name": "threat_check_tool",
-      "description": "Checks if an IP is blacklisted or has a poor reputation score using AbuseIPDB and returns a formatted response."
-    },
-    {
-      "id": "whois_tool",
-      "name": "whois_tool",
-      "description": "Performs a WHOIS lookup on an IP and extracts organization, network range, country, and ASN details in a readable format."
-    },
-    {
       "id": "delegate_task_to_peer_agent",
       "name": "delegate_task_to_peer_agent",
       "description": "Sends a specific task or question to another A2A-compatible agent at a given URL and returns its response. Use this when you lack the capability locally or are explicitly asked to consult another agent.",
