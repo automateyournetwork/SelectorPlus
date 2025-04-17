@@ -632,14 +632,17 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
 
                 async def make_delegate(peer_url=url, skill_id=tool_name):
                     async def delegate(**kwargs):
+                        # Filter out None values from kwargs just like you do for local tools
+                        filtered_tool_input = {k: v for k, v in kwargs.items() if v is not None}
+
                         return await delegate_task_to_peer_agent(
                             peer_agent_url=peer_url,
-                            task_description=f"Call remote tool '{skill_id}' with args: {kwargs}"
+                            task_description=f"Call remote tool '{skill_id}' with args: {json.dumps(filtered_tool_input)}"
                         )
                     return delegate
 
                 # Important: Await and assign the coroutine before tool construction
-                delegate_coroutine = await make_delegate()
+                delegate_coroutine = await make_delegate(url, tool_name)
 
                 tool = StructuredTool.from_function(
                     name=f"{tool_name}_via_{agent_name}",
