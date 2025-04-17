@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langchain.tools import StructuredTool
-from pydantic import create_model
+from pydantic import BaseModel, Field
 
 # --- Environment Variables ---
 A2A_PORT = int(os.getenv("A2A_PORT", 10000))
@@ -395,6 +395,82 @@ async def discover_peer_agents():
 
             except Exception as e:
                 print(f"⚠️ Could not wrap peer tool {tool_name} from {peer_url}: {e}")
+
+def schema_to_pydantic_model(name: str, schema: dict):
+    """Dynamically creates a Pydantic model class from a JSON Schema."""
+    from typing import Any, List, Dict, Optional
+    namespace = {"__annotations__": {}}
+
+    if schema.get("type") != "object":
+        raise ValueError("Only object schemas are supported.")
+
+    properties = schema.get("properties", {})
+    required_fields = set(schema.get("required", []))
+
+    for field_name, field_schema in properties.items():
+        json_type = field_schema.get("type", "string")
+        is_optional = field_name not in required_fields
+
+        if json_type == "string":
+            field_type = str
+        # ... (other simple types: integer, number, boolean) ...
+        elif json_type == "boolean":
+             field_type = bool
+        elif json_type == "array":
+            items_schema = field_schema.get("items")
+            if not items_schema:
+                logger.warning(f"⚠️ Skipping field '{field_name}' (array missing 'items')")
+                continue
+            item_type = items_schema.get("type", "string")
+
+            # ... (handle array of simple types: string, integer, number, boolean) ...
+            if item_type == "string":
+                 field_type = List[str]
+            elif item_type == "integer":
+                 field_type = List[int]
+            elif item_type == "number":
+                 field_type = List[float]
+            elif item_type == "boolean":
+                 field_type = List[bool]
+
+            # --- MODIFICATION START ---
+            elif item_type == "object":
+                # Check if the items schema actually defines properties
+                if "properties" in items_schema and items_schema["properties"]:
+                    # If properties are defined, create a specific item model
+                    item_model = schema_to_pydantic_model(name + "_" + field_name + "_Item", items_schema)
+                    field_type = List[item_model]
+                else:
+                    # If no properties defined for items, assume generic dictionaries
+                    logger.warning(f"Treating array item '{field_name}' as generic List[Dict[str, Any]] due to missing/empty properties in items schema.")
+                    field_type = List[Dict[str, Any]] # Use List[Dict] instead of List[EmptyModel]
+            # --- MODIFICATION END ---
+            else: # Handle array of Any
+                field_type = List[Any]
+
+        elif json_type == "object":
+             # Also check objects - if no properties, maybe treat as Dict[str, Any]?
+             if "properties" in field_schema and field_schema["properties"]:
+                   # Potentially create nested model if needed, or keep as Dict for simplicity
+                   field_type = Dict[str, Any] # Keeping as Dict for now
+             else:
+                   field_type = Dict[str, Any] # Generic object becomes Dict
+
+        else: # Handle Any type
+            field_type = Any
+
+        # ... (rest of the function: optional handling, adding to namespace) ...
+        if is_optional:
+            field_type = Optional[field_type]
+
+        namespace["__annotations__"][field_name] = field_type
+        if field_name in required_fields:
+            namespace[field_name] = Field(...)
+        else:
+            namespace[field_name] = Field(default=None)
+
+    return type(name, (BaseModel,), namespace)
+
 
 # --- Main Execution ---
 if __name__ == "__main__":
