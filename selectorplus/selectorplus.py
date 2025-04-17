@@ -719,26 +719,28 @@ async def load_all_tools():
                 print(f"✅ Discovered peer: {url}")
             else:
                 print(f"⚠️ Failed peer discovery: {url}")
-    
-        # ✅ Load delegated tools
+
         # ✅ Load delegated tools separately
         delegated_tools = await load_delegated_tools(peer_agents)
 
-        # ✅ Final tool set for use in LangGraph
+        # ✅ Finalize tool sets
+        local_tools = []
+        for tools_list in local_tools_lists:
+            local_tools.extend(tools_list)
+
         all_tools = local_tools + delegated_tools + [a2a_delegation_tool]
 
-    
-        # Index all in vector store
+        # ✅ Index only local tools for tool selection
         tool_documents = [
             Document(
                 page_content=f"Tool name: {tool.name}. Tool purpose: {tool.description}",
                 metadata={"tool_name": tool.name}
             )
-            for tool in all_tools if hasattr(tool, "description")
+            for tool in local_tools if hasattr(tool, "description")
         ]
         vector_store.add_documents(tool_documents)
-    
-        return all_tools
+
+        return all_tools, local_tools
 
     except Exception as e:
         print(f"❌ CRITICAL TOOL DISCOVERY ERROR: {e}")
@@ -747,7 +749,7 @@ async def load_all_tools():
         return []
 
 # Load tools
-local_tools = asyncio.run(load_all_tools())
+all_tools, local_tools = asyncio.run(load_all_tools())
 
 
 def format_tool_descriptions(tools: List[Tool]) -> str:
@@ -798,7 +800,7 @@ agent_card = {
 }
 
 # Populate skills from your discovered tools
-for tool in all_tools:
+for tool in local_tools:
     skill = {
         "id": tool.name,  
         "name": tool.name,
