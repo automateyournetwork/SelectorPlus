@@ -653,23 +653,89 @@ async def load_all_tools():
 # Load tools
 valid_tools = asyncio.run(load_all_tools())
 
-#embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-embedding = OpenAIEmbeddings()
+def format_tool_descriptions(tools: List[Tool]) -> str:
+    return "\n".join(
+        f"- `{tool.name}`: {tool.description or 'No description provided.'}"
+        for tool in tools
+    )
+
+embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 vector_store = InMemoryVectorStore(embedding=embedding)
 
-tool_documents =[
+# Make sure peer_agents is populated globally at this point
+peer_agents_path = os.getenv("PEER_AGENTS_PATH", "./peer_agents.json")
+
+try:
+    with open(peer_agents_path, "r") as f:
+        peer_agents = json.load(f)
+    print(f"✅ Loaded {len(peer_agents)} peer agents from {peer_agents_path}")
+except Exception as e:
+    print(f"⚠️ Could not load peer agents from {peer_agents_path}: {e}")
+    peer_agents = {}
+
+async def load_delegated_tools(peer_agents: dict) -> List[StructuredTool]:
+    delegated = []
+
+    for peer_url, agent_card in peer_agents.items():
+        for skill in agent_card.get("skills", []):
+            tool_name = skill["id"]
+            tool_description = skill.get("description", "No description.")
+            tool_params = skill.get("parameters", {})
+
+            try:
+                DynamicInputModel = schema_to_pydantic_model(f"{tool_name}_Input", tool_params)
+
+                async def make_delegate(peer=peer_url, skill_id=tool_name):
+                    async def delegate(**kwargs):
+                        return await delegate_task_to_peer_agent(
+                            peer_agent_url=peer,
+                            task_description=f"Call remote tool '{skill_id}' with args: {kwargs}"
+                        )
+                    return delegate
+
+                delegate_coro = await make_delegate()
+
+                tool = StructuredTool.from_function(
+                    name=f"{tool_name}_via_{agent_card.get('name', 'peer')}",
+                    description=f"[Remote] {tool_description}",
+                    args_schema=DynamicInputModel,
+                    coroutine=delegate_coro,
+                )
+
+                delegated.append(tool)
+
+                # Add to vector store
+                doc = Document(
+                    page_content=f"Tool name: {tool.name}. Tool purpose: {tool.description}",
+                    metadata={"tool_name": tool.name}
+                )
+                vector_store.add_documents([doc])
+                print(f"✅ Wrapped and indexed peer tool: {tool.name}")
+
+            except Exception as e:
+                print(f"⚠️ Failed to wrap peer tool {tool_name} from {peer_url}: {e}")
+
+    return delegated
+
+# Load delegated tools from peer agents
+delegated_tools = asyncio.run(load_delegated_tools(peer_agents))
+
+# Combine all tools
+all_tools = valid_tools + delegated_tools
+
+
+tool_documents = [
     Document(
         page_content=f"Tool name: {tool.name}. Tool purpose: {tool.description}",
         metadata={"tool_name": tool.name}
     )
-    for tool in valid_tools if hasattr(tool, "description")
+    for tool in all_tools if hasattr(tool, "description")
 ]
 
 document_ids = vector_store.add_documents(tool_documents)
 
-print("🔧 All bound tools:", [t.name for t in valid_tools])
-
+print("🔧 All bound tools:", [t.name for t in all_tools])
 
 AGENT_CARD_OUTPUT_DIR = os.getenv("AGENT_CARD_OUTPUT_DIR", "/a2a/.well-known")
 AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
@@ -1259,7 +1325,7 @@ graph_builder = StateGraph(GraphState)
 # Define core nodes
 graph_builder.add_node("select_tools", select_tools)
 graph_builder.add_node("assistant", assistant)
-graph_builder.add_node("tools", ContextAwareToolNode(tools=valid_tools))
+graph_builder.add_node("tools", ContextAwareToolNode(tools=all_tools))
 graph_builder.add_node("handle_tool_results", handle_tool_results)
 
 # Define clean and minimal edges
