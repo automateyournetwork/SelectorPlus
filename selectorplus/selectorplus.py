@@ -993,7 +993,6 @@ class ContextAwareToolNode(ToolNode):
         # Return state, rely on graph definition for next step ('handle_tool_results')
         return {"messages": new_messages, "context": context}
 
-@traceable
 async def select_tools(state: GraphState):
     messages = state.get("messages", [])
     context = state.get("context", {})
