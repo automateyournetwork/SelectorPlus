@@ -698,13 +698,13 @@ async def load_all_tools():
         print(docker_ps_result.stdout)
 
         service_discoveries = {}
-        all_service_tools = await asyncio.gather(
+        local_tools_lists  = await asyncio.gather(
             *[get_tools_for_service(service, command, discovery_method, call_method, service_discoveries)
               for service, command, discovery_method, call_method in tool_services]
         )
     
         all_tools = []
-        for tools_list in all_service_tools:
+        for tools_list in local_tools_lists :
             all_tools.extend(tools_list)
     
         # ✅ Peer discovery inside this function
@@ -721,11 +721,12 @@ async def load_all_tools():
                 print(f"⚠️ Failed peer discovery: {url}")
     
         # ✅ Load delegated tools
+        # ✅ Load delegated tools separately
         delegated_tools = await load_delegated_tools(peer_agents)
-        all_tools.extend(delegated_tools)
-    
-        # Add your delegation tool last
-        all_tools.append(a2a_delegation_tool)
+
+        # ✅ Final tool set for use in LangGraph
+        all_tools = local_tools + delegated_tools + [a2a_delegation_tool]
+
     
         # Index all in vector store
         tool_documents = [
@@ -746,7 +747,8 @@ async def load_all_tools():
         return []
 
 # Load tools
-all_tools = asyncio.run(load_all_tools())
+local_tools = asyncio.run(load_all_tools())
+
 
 def format_tool_descriptions(tools: List[Tool]) -> str:
     return "\n".join(
