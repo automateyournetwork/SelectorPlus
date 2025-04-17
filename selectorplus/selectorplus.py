@@ -1068,7 +1068,20 @@ Consider these guidelines:
             selected_tool_names = []
         else:
             potential_names = [name.strip() for name in raw_selection.split(',')]
-            selected_tool_names = [name for name in potential_names if name in tool_infos]
+
+            # 🔧 Normalize selection for delegated tools (e.g., ask_selector → ask_selector_via_xxx)
+            normalized_tool_names = {}
+            for name in tool_infos.keys():
+                base_name = name.split("_via_")[0] if "_via_" in name else name
+                normalized_tool_names[base_name] = name  # Always map shortest name → full name
+            
+            # Map LLM-chosen names to full tool names
+            selected_tool_names = [
+                normalized_tool_names.get(name, name)
+                for name in potential_names
+                if name in normalized_tool_names
+            ]
+
             if len(selected_tool_names) != len(potential_names):
                 logger.warning(f"⚠️ LLM selected invalid tools: {set(potential_names) - set(selected_tool_names)}")
 
