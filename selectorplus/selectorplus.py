@@ -607,41 +607,45 @@ async def load_all_tools():
         print(docker_ps_result.stdout)
 
         service_discoveries = {}
-
-        # Gather tools from all services
         all_service_tools = await asyncio.gather(
             *[get_tools_for_service(service, command, discovery_method, call_method, service_discoveries)
               for service, command, discovery_method, call_method in tool_services]
         )
-
-        # Add local tools
-        print("🔍 Loading Local Tools:")
-        local_tools = load_local_tools_from_folder("tools")
-        print(f"🧰 Local Tools Found: {[tool.name for tool in local_tools]}")
-
-        # Combine all tools
+    
         all_tools = []
         for tools_list in all_service_tools:
-            if tools_list:
-                all_tools.extend(tools_list)
-        all_tools.extend(local_tools)
-
-        # *** ADD THE NEW DELEGATION TOOL ***
+            all_tools.extend(tools_list)
+    
+        # ✅ Peer discovery inside this function
+        peer_agents = {}
+        for url in A2A_PEER_AGENTS:
+            url = url.strip()
+            if not url:
+                continue
+            agent = await discover_agent(url)
+            if agent:
+                peer_agents[url] = agent
+                print(f"✅ Discovered peer: {url}")
+            else:
+                print(f"⚠️ Failed peer discovery: {url}")
+    
+        # ✅ Load delegated tools
+        delegated_tools = await load_delegated_tools(peer_agents)
+        all_tools.extend(delegated_tools)
+    
+        # Add your delegation tool last
         all_tools.append(a2a_delegation_tool)
-        logger.info(f"✅ Added A2A Delegation Tool: {a2a_delegation_tool.name}")
-        # *** END ADDITION ***
-
-        print("🔧 Comprehensive Tool Discovery Results:")
-        print("✅ All Discovered Tools:", [t.name for t in all_tools])
-
-        if not all_tools:
-            print("🚨 WARNING: NO TOOLS DISCOVERED 🚨")
-            print("Potential Issues:")
-            print("1. Docker containers not running")
-            print("2. Incorrect discovery methods")
-            print("3. Network/communication issues")
-            print("4. Missing tool configuration")
-
+    
+        # Index all in vector store
+        tool_documents = [
+            Document(
+                page_content=f"Tool name: {tool.name}. Tool purpose: {tool.description}",
+                metadata={"tool_name": tool.name}
+            )
+            for tool in all_tools if hasattr(tool, "description")
+        ]
+        vector_store.add_documents(tool_documents)
+    
         return all_tools
 
     except Exception as e:
@@ -662,72 +666,6 @@ def format_tool_descriptions(tools: List[Tool]) -> str:
 embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
 vector_store = InMemoryVectorStore(embedding=embedding)
-
-A2A_PEER_AGENTS = os.getenv("A2A_PEER_AGENTS", "").split(",")
-peer_agents = {}
-
-async def discover_peers():
-    for url in A2A_PEER_AGENTS:
-        url = url.strip()
-        if not url:
-            continue
-        agent = await discover_agent(url)
-        if agent:
-            peer_agents[url] = agent
-            print(f"✅ Discovered: {url}")
-        else:
-            print(f"⚠️ Failed: {url}")
-
-asyncio.run(discover_peers())
-
-async def load_delegated_tools(peer_agents: dict) -> List[StructuredTool]:
-    delegated = []
-
-    for peer_url, agent_card in peer_agents.items():
-        for skill in agent_card.get("skills", []):
-            tool_name = skill["id"]
-            tool_description = skill.get("description", "No description.")
-            tool_params = skill.get("parameters", {})
-
-            try:
-                DynamicInputModel = schema_to_pydantic_model(f"{tool_name}_Input", tool_params)
-
-                async def make_delegate(peer=peer_url, skill_id=tool_name):
-                    async def delegate(**kwargs):
-                        return await delegate_task_to_peer_agent(
-                            peer_agent_url=peer,
-                            task_description=f"Call remote tool '{skill_id}' with args: {kwargs}"
-                        )
-                    return delegate
-
-                delegate_coro = await make_delegate()
-
-                tool = StructuredTool.from_function(
-                    name=f"{tool_name}_via_{agent_card.get('name', 'peer')}",
-                    description=f"[Remote] {tool_description}",
-                    args_schema=DynamicInputModel,
-                    coroutine=delegate_coro,
-                )
-
-                delegated.append(tool)
-
-                # Add to vector store
-                doc = Document(
-                    page_content=f"Tool name: {tool.name}. Tool purpose: {tool.description}",
-                    metadata={"tool_name": tool.name}
-                )
-                vector_store.add_documents([doc])
-                print(f"✅ Wrapped and indexed peer tool: {tool.name}")
-
-            except Exception as e:
-                print(f"⚠️ Failed to wrap peer tool {tool_name} from {peer_url}: {e}")
-
-    return delegated
-
-# Load delegated tools from peer agents
-delegated_tools = asyncio.run(load_delegated_tools(peer_agents))
-
-valid_tools.extend(delegated_tools)
 
 # Combine all tools
 all_tools = valid_tools
