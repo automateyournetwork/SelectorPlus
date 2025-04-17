@@ -24,6 +24,7 @@ from langgraph.prebuilt.tool_node import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langgraph.a2a.discovery import discover_agent
 
 A2A_PEER_AGENTS = os.getenv("A2A_PEER_AGENTS", "").split(",")
 
