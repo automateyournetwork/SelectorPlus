@@ -761,7 +761,7 @@ agent_card = {
 }
 
 # Populate skills from your discovered tools
-for tool in valid_tools:
+for tool in all_tools:
     skill = {
         "id": tool.name,  
         "name": tool.name,
@@ -789,7 +789,7 @@ print("DEBUG: Full absolute path check:", os.path.abspath(AGENT_CARD_PATH))
 #llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
 llm = ChatOpenAI(model_name="gpt-4o", temperature="0.1")
 
-llm_with_tools = llm.bind_tools(valid_tools)
+llm_with_tools = llm.bind_tools(all_tools)
 
 def format_tool_descriptions(tools: List[Tool]) -> str:
     """Formats the tool descriptions into a string."""
@@ -1241,12 +1241,12 @@ async def assistant(state: GraphState):
     # If selected_tool_names is empty, fall back to ALL tools not already used
     if selected_tool_names:
         tools_to_use = [
-            tool for tool in valid_tools
+            tool for tool in all_tools
             if tool.name in selected_tool_names and tool.name not in used
         ]
     else:
         tools_to_use = [
-            tool for tool in valid_tools
+            tool for tool in all_tools
             if tool.name not in used
         ]
 
