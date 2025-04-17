@@ -628,6 +628,10 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
 
     return delegated_tools
 
+embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+
+vector_store = InMemoryVectorStore(embedding=embedding)
+
 async def load_all_tools():
     """Async function to load tools from different MCP services and local files."""
     print("🚨 COMPREHENSIVE TOOL DISCOVERY STARTING 🚨")
@@ -714,10 +718,6 @@ def format_tool_descriptions(tools: List[Tool]) -> str:
         f"- `{tool.name}`: {tool.description or 'No description provided.'}"
         for tool in tools
     )
-
-embedding = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-
-vector_store = InMemoryVectorStore(embedding=embedding)
 
 # Combine all tools
 all_tools = valid_tools
