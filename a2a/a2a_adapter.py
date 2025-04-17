@@ -11,6 +11,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langchain.tools import StructuredTool
 from pydantic import BaseModel, Field
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 # --- Environment Variables ---
 A2A_PORT = int(os.getenv("A2A_PORT", 10000))
