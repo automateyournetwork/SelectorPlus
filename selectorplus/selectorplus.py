@@ -616,20 +616,50 @@ def make_delegation_coroutine(peer_agent_url: str):
     return wrapper
 
 async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
-    """Creates delegation tools for each discovered peer agent."""
+    """Creates delegation tools and wraps each peer agent's skills."""
     delegated_tools = []
 
-    for url, metadata in peer_agents.items():
-        agent_name = metadata.get("name", "Unnamed Agent")
-        description = metadata.get("description", "No description provided.")
+    for url, agent_card in peer_agents.items():
+        agent_name = agent_card.get("name", "peer").replace(" ", "_").lower()
 
-        tool = StructuredTool.from_function(
-            name=f"delegate_to_{agent_name.lower().replace(' ', '_')}",
-            description=f"Delegates a task to peer agent '{agent_name}' at {url}. Description: {description}",
+        for skill in agent_card.get("skills", []):
+            tool_name = skill["id"]
+            tool_description = skill.get("description", "")
+            tool_schema = skill.get("parameters", {})
+
+            try:
+                InputModel = schema_to_pydantic_model(f"{tool_name}_Input", tool_schema)
+
+                async def make_delegate(peer_url=url, skill_id=tool_name):
+                    async def delegate(**kwargs):
+                        return await delegate_task_to_peer_agent(
+                            peer_agent_url=peer_url,
+                            task_description=f"Call remote tool '{skill_id}' with args: {kwargs}"
+                        )
+                    return delegate
+
+                # Important: Await and assign the coroutine before tool construction
+                delegate_coroutine = await make_delegate()
+
+                tool = StructuredTool.from_function(
+                    name=f"{tool_name}_via_{agent_name}",
+                    description=f"[Remote] {tool_description}",
+                    args_schema=InputModel,
+                    coroutine=delegate_coroutine
+                )
+                delegated_tools.append(tool)
+                print(f"✅ Wrapped remote tool: {tool.name}")
+            except Exception as e:
+                print(f"⚠️ Could not wrap tool {tool_name} from {url}: {e}")
+
+        # Also create a delegation tool (explicit peer task delegation)
+        delegation_tool = StructuredTool.from_function(
+            name=f"delegate_to_{agent_name}",
+            description=f"Delegate task directly to {agent_name} at {url}",
             args_schema=DelegateToPeerSchema,
-            coroutine=make_delegation_coroutine(url)
+            coroutine=lambda **kwargs: delegate_task_to_peer_agent(peer_agent_url=url, **kwargs)
         )
-        delegated_tools.append(tool)
+        delegated_tools.append(delegation_tool)
 
     return delegated_tools
 
