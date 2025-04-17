@@ -1399,6 +1399,7 @@ compiled_graph = graph_builder.compile()
 async def run_cli_interaction():
     """Runs the CLI interaction loop."""
     state = {"messages": [], "context": {"used_tools": []}}
+    print("🛠️ Available tools:", [tool.name for tool in all_tools])
     while True:
         user_input = input("User: ")
         if user_input.lower() in ["exit", "quit"]:
