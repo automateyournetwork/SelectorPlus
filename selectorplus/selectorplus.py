@@ -642,7 +642,7 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
                 delegate_coroutine = await make_delegate()
 
                 tool = StructuredTool.from_function(
-                    name=f"{tool_name}_via_{agent_name}",
+                    name=f"{tool_name}",
                     description=f"[Remote] {tool_description}",
                     args_schema=InputModel,
                     coroutine=delegate_coroutine
