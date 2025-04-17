@@ -642,7 +642,7 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
                 delegate_coroutine = await make_delegate()
 
                 tool = StructuredTool.from_function(
-                    name=f"{tool_name}",
+                    name=f"{tool_name}_via_{agent_name}",
                     description=f"[Remote] {tool_description}",
                     args_schema=InputModel,
                     coroutine=delegate_coroutine
@@ -1074,7 +1074,7 @@ Consider these guidelines:
             for name in tool_infos.keys():
                 base_name = name.split("_via_")[0] if "_via_" in name else name
                 normalized_tool_names[base_name] = name  # Always map shortest name → full name
-            
+
             # Map LLM-chosen names to full tool names
             selected_tool_names = [
                 normalized_tool_names.get(name, name)
