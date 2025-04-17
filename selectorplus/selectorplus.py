@@ -610,6 +610,11 @@ async def discover_agent(url: str) -> Optional[dict]:
 
     return None
 
+def make_delegation_coroutine(peer_agent_url: str):
+    async def wrapper(**kwargs):
+        return await delegate_task_to_peer_agent(peer_agent_url=peer_agent_url, **kwargs)
+    return wrapper
+
 async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
     """Creates delegation tools for each discovered peer agent."""
     delegated_tools = []
@@ -622,7 +627,7 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
             name=f"delegate_to_{agent_name.lower().replace(' ', '_')}",
             description=f"Delegates a task to peer agent '{agent_name}' at {url}. Description: {description}",
             args_schema=DelegateToPeerSchema,
-            coroutine=lambda peer_agent_url=url, **kwargs: delegate_task_to_peer_agent(peer_agent_url=peer_agent_url, **kwargs)
+            coroutine=make_delegation_coroutine(url)
         )
         delegated_tools.append(tool)
 
