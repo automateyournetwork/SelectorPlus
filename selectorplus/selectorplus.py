@@ -774,7 +774,7 @@ AGENT_CARD_OUTPUT_DIR = os.getenv("AGENT_CARD_OUTPUT_DIR", "/a2a/.well-known")
 AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
 
 # Environment variables or defaults
-AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Plus Agent Enhanced with Model Context Protocol Toolkit")
+AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Agent")
 AGENT_DESCRIPTION = os.getenv("A2A_AGENT_DESCRIPTION", "LangGraph-based MCP agent for Selector AI and other MCPs.")
 AGENT_HOST = os.getenv("A2A_AGENT_HOST", "70.53.207.50")
 AGENT_PORT = os.getenv("A2A_AGENT_PORT", "10000")
