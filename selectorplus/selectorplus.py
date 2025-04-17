@@ -711,17 +711,13 @@ async def load_all_tools():
         return []
 
 # Load tools
-valid_tools = asyncio.run(load_all_tools())
+all_tools = asyncio.run(load_all_tools())
 
 def format_tool_descriptions(tools: List[Tool]) -> str:
     return "\n".join(
         f"- `{tool.name}`: {tool.description or 'No description provided.'}"
         for tool in tools
     )
-
-# Combine all tools
-all_tools = valid_tools
-
 
 tool_documents = [
     Document(
