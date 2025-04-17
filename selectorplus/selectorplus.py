@@ -639,7 +639,7 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
                     return delegate
 
                 # Important: Await and assign the coroutine before tool construction
-                delegate_coroutine = make_delegate()
+                delegate_coroutine = await make_delegate()
 
                 tool = StructuredTool.from_function(
                     name=f"{tool_name}_via_{agent_name}",
