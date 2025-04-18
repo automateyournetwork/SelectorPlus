@@ -181,6 +181,8 @@ async def send_task(request: Request):
                     }
                 },
                 "assistant_id": AGENT_ID
+            }
+            
             if AGENT_ID: langgraph_payload["assistant_id"] = AGENT_ID
 
             # --- Inject optional fields from params into the LangGraph input ---
