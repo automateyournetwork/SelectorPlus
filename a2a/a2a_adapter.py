@@ -222,8 +222,8 @@ async def send_task(request: Request):
                     artifacts.append({
                         "type": mime_type,
                         "uri": artifact_uri,
-                        "description": f"Auto-discovered artifact: {filename}"
-                    })
+                        "description": f"Auto-discovered artifact: {filename}",
+                        "parts": [{"type": "text", "text": f"Saved chart: {filename}"}]
 
             result_payload = {
                  "id": task_param_id,
@@ -236,14 +236,14 @@ async def send_task(request: Request):
 
             if final_response_content:
                 print(f"✅ Successfully processed stream for task {task_param_id}. Placing answer in status.message.")
-                
+
                 # Optionally append links
                 if artifacts:
                     public_links = "\n".join(
                         f"[{a['description']}]({a['uri']})" for a in artifacts
                     )
                     final_response_content += f"\n\n📎 Public File Links:\n{public_links}"
-            
+
                 final_status_object["message"] = {
                      "role": "agent",
                      "parts": [{"type": "text", "text": final_response_content}]
