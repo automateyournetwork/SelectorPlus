@@ -32,6 +32,9 @@ threads = {}
 
 # Mount points
 app.mount("/.well-known", StaticFiles(directory="/a2a/.well-known"), name="well-known")
+
+os.makedirs("/output", exist_ok=True)
+
 app.mount("/output", StaticFiles(directory="/output"), name="output")
 
 @app.get("/.well-known/agent.json", tags=["A2A Discovery"])
