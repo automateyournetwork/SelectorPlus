@@ -216,12 +216,13 @@ async def send_task(request: Request):
                 if filename.endswith(".png") or filename.endswith(".svg"):
                     filepath = os.path.join(output_dir, filename)
                     mime_type = "image/png" if filename.endswith(".png") else "image/svg+xml"
+                    public_base_url = os.getenv("PUBLIC_BASE_URL", "")  # fallback to "" if unset
+                    artifact_path = f"/output/{filename}"
                     artifacts.append({
                         "type": mime_type,
-                        "uri": f"/output/{filename}",
+                        "uri": public_base_url + artifact_path if public_base_url else artifact_path,
                         "description": f"Auto-discovered artifact: {filename}"
                     })
-
 
             result_payload = {
                  "id": task_param_id,
