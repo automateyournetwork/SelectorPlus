@@ -927,6 +927,14 @@ class ContextAwareToolNode(ToolNode):
 
             try:
                 # Execute the tool
+                 # Invoke the tool (which now calls MCPToolDiscovery.call_tool)
+                 # PATCH: Fix path for read_file to convert /output → /projects
+                 if tool_name == "read_file" and isinstance(filtered_tool_input, dict):
+                     original_path = filtered_tool_input.get("path", "")
+                     if original_path.startswith("/output"):
+                         filtered_tool_input["path"] = original_path.replace("/output", "/projects")
+                         logger.info(f"🔧 Remapped file path for read_file: {original_path} → {filtered_tool_input['path']}")
+
                 tool_response = await tool.ainvoke(filtered_tool_input, config=config) # Pass config
 
                 logger.debug(f"Raw tool response for {tool.name}: Type={type(tool_response)}, Value={repr(tool_response)}")
