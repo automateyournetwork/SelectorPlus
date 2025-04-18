@@ -190,7 +190,7 @@ async def delegate_task_to_peer_agent(peer_agent_url: str, task_description: str
                 "role": "user",
                 "parts": [{"type": "text", "text": task_description}]
             },
-            "acceptedOutputModes": ["text"] # Specify desired output
+            "acceptedOutputModes": ["text", "structured"] # Specify desired output
             # Add other params like historyLength if needed
         },
         "id": request_id

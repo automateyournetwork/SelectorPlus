@@ -30,7 +30,9 @@ app = FastAPI(
 
 threads = {}
 
+# Mount points
 app.mount("/.well-known", StaticFiles(directory="/a2a/.well-known"), name="well-known")
+app.mount("/output", StaticFiles(directory="/output"), name="output")
 
 @app.get("/.well-known/agent.json", tags=["A2A Discovery"])
 async def agent_card():
@@ -153,6 +155,21 @@ async def send_task(request: Request):
             }
             if AGENT_ID: langgraph_payload["assistant_id"] = AGENT_ID
 
+            # --- Inject optional fields from params into the LangGraph input ---
+            # 1. historyLength -> controls how many past messages LangGraph includes
+            if "historyLength" in params:
+                langgraph_payload["input"]["historyLength"] = params["historyLength"]
+            
+            # 2. metadata -> attach custom user-defined metadata to the LangGraph input
+            if "metadata" in params:
+                langgraph_payload["input"]["metadata"] = params["metadata"]
+            else:
+                langgraph_payload["input"]["metadata"] = {}
+            
+            # 3. parentId -> add as part of metadata if supplied
+            if "parentId" in params:
+                langgraph_payload["input"]["metadata"]["parentId"] = params["parentId"]
+
             print(f"Calling LangGraph for task {task_param_id}: POST /threads/{thread_id}/runs/stream")
             resp = await client.post(f"/threads/{thread_id}/runs/stream", json=langgraph_payload, timeout=90.0)
             resp.raise_for_status()
@@ -188,11 +205,26 @@ async def send_task(request: Request):
                 "state": "completed",
                 "timestamp": datetime.now().isoformat()
             }
+
+            # --- Artifact detection ---
+            artifacts = []
+            output_dir = "/output"
+            for filename in os.listdir(output_dir):
+                if filename.endswith(".png") or filename.endswith(".svg"):
+                    filepath = os.path.join(output_dir, filename)
+                    mime_type = "image/png" if filename.endswith(".png") else "image/svg+xml"
+                    artifacts.append({
+                        "type": mime_type,
+                        "uri": f"/output/{filename}",
+                        "description": f"Auto-discovered artifact: {filename}"
+                    })
+
+
             result_payload = {
                  "id": task_param_id,
                  "status": final_status_object,
                  "sessionId": session_id, # Use the correct field name
-                 "artifacts": None,       # Explicitly include optional fields as None
+                 "artifacts": artifacts if artifacts else None,       # Explicitly include optional fields as None
                  "history": None,
                  "metadata": None
              }
