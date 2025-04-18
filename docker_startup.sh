@@ -243,8 +243,7 @@ docker run -p 2024:2024 -dit \
   -v $(pwd)/a2a:/a2a \
   -e AGENT_CARD_OUTPUT_DIR=/a2a/.well-known \
   --env-file .env \
-  -v $(pwd)/output:/output \ 
-  --name langgraph-selectorplus \
+  -v $(pwd)/output:/output \
   langgraph-selectorplus
 
 # echo "Starting streamlit-app container..."
