@@ -216,11 +216,12 @@ async def send_task(request: Request):
                 if filename.endswith(".png") or filename.endswith(".svg"):
                     filepath = os.path.join(output_dir, filename)
                     mime_type = "image/png" if filename.endswith(".png") else "image/svg+xml"
-                    public_base_url = os.getenv("PUBLIC_BASE_URL", "")  # fallback to "" if unset
-                    artifact_path = f"/output/{filename}"
+                    public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+                    artifact_uri = f"{public_base_url}/output/{filename}" if public_base_url else f"/output/{filename}"
+                    
                     artifacts.append({
                         "type": mime_type,
-                        "uri": public_base_url + artifact_path if public_base_url else artifact_path,
+                        "uri": artifact_uri,
                         "description": f"Auto-discovered artifact: {filename}"
                     })
 
@@ -235,7 +236,14 @@ async def send_task(request: Request):
 
             if final_response_content:
                 print(f"✅ Successfully processed stream for task {task_param_id}. Placing answer in status.message.")
-                # Package final AI response into the status message
+                
+                # Optionally append links
+                if artifacts:
+                    public_links = "\n".join(
+                        f"[{a['description']}]({a['uri']})" for a in artifacts
+                    )
+                    final_response_content += f"\n\n📎 Public File Links:\n{public_links}"
+            
                 final_status_object["message"] = {
                      "role": "agent",
                      "parts": [{"type": "text", "text": final_response_content}]
