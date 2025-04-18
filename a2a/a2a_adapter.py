@@ -89,11 +89,33 @@ async def send_task(request: Request):
     message_content = None
     message_object = params.get("message")
     if isinstance(message_object, dict):
-        message_parts = message_object.get("parts")
-        if isinstance(message_parts, list) and len(message_parts) > 0:
-            first_part = message_parts[0]
-            if isinstance(first_part, dict) and first_part.get("type") == "text":
-                message_content = first_part.get("text")
+        message_parts = message_object.get("parts", [])
+
+        # Extract any attached files and save them to /output
+        file_parts = [
+            part for part in message_parts
+            if isinstance(part, dict) and part.get("type") == "file" and "file" in part
+        ]
+
+        file_paths = []
+        for part in file_parts:
+            file_info = part["file"]
+            file_name = file_info.get("name", f"uploaded_{uuid.uuid4().hex}")
+            file_bytes = file_info.get("bytes")
+
+            if file_bytes:
+                decoded = base64.b64decode(file_bytes)
+                filepath = os.path.join("/output", file_name)
+                with open(filepath, "wb") as f:
+                    f.write(decoded)
+                file_paths.append(filepath)
+                print(f"📁 Saved uploaded file to {filepath}")
+
+        # Extract the message content (text) if present
+        for part in message_parts:
+            if isinstance(part, dict) and part.get("type") == "text":
+                message_content = part.get("text")
+                break  # stop at the first text part
 
     # Prepare failed status structure conforming to TaskStatus model
     failed_status = {
@@ -153,9 +175,12 @@ async def send_task(request: Request):
             langgraph_payload = {
                 "input": {
                     "messages": [{"role": "user", "type": "human", "content": message_content}],
-                    "peer_agents": list(peer_agents.values())  # 👈 include discovered peer cards
-                }
-            }
+                    "peer_agents": list(peer_agents.values()),
+                    "metadata": {
+                        "uploaded_files": file_paths  # 👈 STEP 2: send file paths into LangGraph
+                    }
+                },
+                "assistant_id": AGENT_ID
             if AGENT_ID: langgraph_payload["assistant_id"] = AGENT_ID
 
             # --- Inject optional fields from params into the LangGraph input ---

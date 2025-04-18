@@ -1297,62 +1297,72 @@ GENERAL RULES:
 
 @traceable
 async def assistant(state: GraphState):
-    """Handles assistant logic and LLM interaction, with support for sequential tool calls."""
+    """Handles assistant logic and LLM interaction, with support for sequential tool calls and uploaded file processing."""
     messages = state.get("messages", [])
     context = state.get("context", {})
     selected_tool_names = context.get("selected_tools", [])
     run_mode = context.get("run_mode", "start")
-    used = set(context.get("used_tools", []))
 
+    used = set(context.get("used_tools", []))
     # If selected_tool_names is empty, fall back to ALL tools not already used
     if selected_tool_names:
         tools_to_use = [
-            tool for tool in all_tools
+            tool for tool in all_tools 
             if tool.name in selected_tool_names and tool.name not in used
         ]
     else:
+        # Broaden scope — allow Gemini to pick missed tools (Slack, GitHub, etc.)
         tools_to_use = [
-            tool for tool in all_tools
+            tool for tool in all_tools 
             if tool.name not in used
         ]
+
+    # 👇 STEP 3: Handle uploaded files from context
+    uploaded_files = context.get("metadata", {}).get("uploaded_files", [])
+    file_contexts = []
+    for path in uploaded_files:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            file_contexts.append(f"--- {os.path.basename(path)} ---\n{content}\n")
+        except Exception as e:
+            file_contexts.append(f"Could not read file {path}: {e}")
 
     # If we're in continuous mode, don't re-select tools
     if run_mode == "continue":
         last_tool_message = None
-        # Find the last tool message
         for msg in reversed(messages):
             if isinstance(msg, ToolMessage):
                 last_tool_message = msg
                 break
 
         if last_tool_message:
-            # Add the tool message to ensure proper conversation context
             new_messages = [SystemMessage(content=system_msg)] + messages
 
             llm_with_tools = llm.bind_tools(tools_to_use)
             response = await llm_with_tools.ainvoke(new_messages, config={"tool_choice": "auto"})
 
             if hasattr(response, "tool_calls") and response.tool_calls:
-                # Continue using tools
                 return {"messages": [response], "context": context, "__next__": "tools"}
             else:
-                # No more tools to use, return to user
                 return {"messages": [response], "context": context, "__next__": "__end__"}
 
     # Initial processing or starting a new sequence
     llm_with_tools = llm.bind_tools(tools_to_use)
     formatted_tool_descriptions = format_tool_descriptions(tools_to_use)
-    # Inject tool memory into system message
     formatted_system_msg = system_msg.format(tool_descriptions=formatted_tool_descriptions)
     context_summary = summarize_recent_tool_outputs(context)
-    
+
     if context_summary:
-        formatted_system_msg += f"\n\n📥 RECENT TOOL RESPONSES:\n{context_summary}"
-    
+        formatted_system_msg += f"\n\n📅 RECENT TOOL RESPONSES:\n{context_summary}"
+
+    if file_contexts:
+        formatted_system_msg += f"\n\n📎 UPLOADED FILES:\n{''.join(file_contexts)}"
+
     new_messages = [SystemMessage(content=formatted_system_msg)] + messages
+
     try:
         logger.info(f"assistant: Invoking LLM with new_messages: {new_messages}")
-        # Always use auto tool choice to allow model to decide which tools to use
         response = await llm_with_tools.ainvoke(new_messages, config={"tool_choice": "auto"})
         logger.info(f"Raw LLM Response: {response}")
 
