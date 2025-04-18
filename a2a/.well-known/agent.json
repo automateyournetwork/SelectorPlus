@@ -1,5 +1,5 @@
 {
-  "name": "Selector Plus Agent Enhanced with Model Context Protocol Toolkit",
+  "name": "Selector Agent",
   "description": "LangGraph-based MCP agent for Selector AI and other MCPs.",
   "version": "1.0",
   "url": "http://70.53.207.50:10000",
@@ -69,44 +69,6 @@
           }
         },
         "title": "selector_mcp_get_selector_phrases_Input",
-        "type": "object"
-      }
-    },
-    {
-      "id": "delegate_task_to_peer_agent",
-      "name": "delegate_task_to_peer_agent",
-      "description": "Sends a specific task or question to another A2A-compatible agent at a given URL and returns its response. Use this when you lack the capability locally or are explicitly asked to consult another agent.",
-      "parameters": {
-        "properties": {
-          "peer_agent_url": {
-            "description": "The base URL of the peer A2A agent to contact (e.g., http://agent2.example.com:10001).",
-            "title": "Peer Agent Url",
-            "type": "string"
-          },
-          "task_description": {
-            "description": "The specific task or question to send to the peer agent.",
-            "title": "Task Description",
-            "type": "string"
-          },
-          "session_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "Optional session ID to maintain conversation context.",
-            "title": "Session Id"
-          }
-        },
-        "required": [
-          "peer_agent_url",
-          "task_description"
-        ],
-        "title": "DelegateToPeerSchema",
         "type": "object"
       }
     }

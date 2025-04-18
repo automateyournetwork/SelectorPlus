@@ -232,7 +232,7 @@ docker run -p 10000:10000 -dit \
   --add-host=host.docker.internal:host-gateway \
   -e LANGGRAPH_URL=http://host.docker.internal:2024 \
   -e PUBLIC_BASE_URL=https://70.53.207.50 \
-  -v "$(pwd)/output:/output" \
+  -v "/Users/johncapobianco/SelectorPlus/shared_output:/output" \
   -e A2A_PORT=10000 \
   a2a-adapter
 
@@ -244,7 +244,7 @@ docker run -p 2024:2024 -dit \
   -v "$(pwd)/a2a:/a2a" \
   -e AGENT_CARD_OUTPUT_DIR=/a2a/.well-known \
   --env-file .env \
-  -v "$(pwd)/output:/output" \
+  -v "/Users/johncapobianco/SelectorPlus/shared_output:/output" \
   langgraph-selectorplus
 
 
