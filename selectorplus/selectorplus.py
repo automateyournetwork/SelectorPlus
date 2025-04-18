@@ -146,6 +146,13 @@ def schema_to_pydantic_model(name: str, schema: dict):
 
     return type(name, (BaseModel,), namespace)
 
+def summarize_recent_tool_outputs(context: dict, limit: int = 3) -> str:
+    summaries = []
+    for key, val in list(context.items())[-limit:]:
+        if isinstance(val, (str, dict, list)):
+            preview = str(val)[:500]  # Avoid large dumps
+            summaries.append(f"- {key}: {preview}")
+    return "\n".join(summaries)
 
 # Define the input schema for the delegation tool
 class DelegateToPeerSchema(BaseModel):
@@ -1118,6 +1125,11 @@ GENERAL RULES:
 4. NEVER call a tool without all required parameters.
 5. NEVER call a tool just because the output of another tool suggests a next step — unless the user explicitly asked for that.
 
+🧠 CONTEXT MEMORY:
+- You may use results of previously run tools by referring to their output in memory.
+- For example, if you ran a tool like `pyats_via_agent1`, the result will be stored and available in memory under that name.
+- When using follow-up tools like `ask_selector`, reuse this result as needed.
+
 🔄 **AFTER A TOOL RUNS:**
 - When you receive information back from a tool in a `ToolMessage`, your **only** goal is to synthesize this information into a final, natural language answer for the user.
 - Present the key findings from the `ToolMessage` clearly and concisely.
@@ -1330,9 +1342,14 @@ async def assistant(state: GraphState):
     # Initial processing or starting a new sequence
     llm_with_tools = llm.bind_tools(tools_to_use)
     formatted_tool_descriptions = format_tool_descriptions(tools_to_use)
+    # Inject tool memory into system message
     formatted_system_msg = system_msg.format(tool_descriptions=formatted_tool_descriptions)
+    context_summary = summarize_recent_tool_outputs(context)
+    
+    if context_summary:
+        formatted_system_msg += f"\n\n📥 RECENT TOOL RESPONSES:\n{context_summary}"
+    
     new_messages = [SystemMessage(content=formatted_system_msg)] + messages
-
     try:
         logger.info(f"assistant: Invoking LLM with new_messages: {new_messages}")
         # Always use auto tool choice to allow model to decide which tools to use
