@@ -3,6 +3,7 @@ import json
 import uuid
 import os
 import re
+import base64
 import traceback
 from datetime import datetime # Import datetime for timestamp
 from fastapi import FastAPI, Request
@@ -182,7 +183,7 @@ async def send_task(request: Request):
                 },
                 "assistant_id": AGENT_ID
             }
-            
+
             if AGENT_ID: langgraph_payload["assistant_id"] = AGENT_ID
 
             # --- Inject optional fields from params into the LangGraph input ---
