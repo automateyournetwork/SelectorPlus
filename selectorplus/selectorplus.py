@@ -23,7 +23,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt.tool_node import ToolNode
 #from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI, AsyncOpenAIEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.runnables import RunnableLambda
 
 A2A_PEER_AGENTS = os.getenv("A2A_PEER_AGENTS", "").split(",")
 
@@ -673,9 +674,10 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
 
     return delegated_tools
 
-embedding = AsyncOpenAIEmbeddings()
+embedding = OpenAIEmbeddings()
+embedding_runnable = RunnableLambda(lambda x: sync_embedding.embed_query(x))
 
-vector_store = InMemoryVectorStore(embedding=embedding)
+vector_store = InMemoryVectorStore(embedding=embedding_runnable)
 
 async def load_all_tools():
     """Async function to load tools from different MCP services and local files."""
