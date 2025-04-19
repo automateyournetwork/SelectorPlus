@@ -21,9 +21,9 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from typing import Dict, Any, List, Optional, Union, Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt.tool_node import ToolNode
-#from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 
 A2A_PEER_AGENTS = os.getenv("A2A_PEER_AGENTS", "").split(",")
 
@@ -673,7 +673,7 @@ async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
 
     return delegated_tools
 
-embedding = OpenAIEmbeddings()
+embedding = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 vector_store = InMemoryVectorStore(embedding=embedding)
 
