@@ -761,22 +761,11 @@ async def load_all_tools():
 # Load tools
 all_tools, local_tools = asyncio.run(load_all_tools())
 
-
 def format_tool_descriptions(tools: List[Tool]) -> str:
     return "\n".join(
         f"- `{tool.name}`: {tool.description or 'No description provided.'}"
         for tool in tools
     )
-
-tool_documents = [
-    Document(
-        page_content=f"Tool name: {tool.name}. Tool purpose: {tool.description}",
-        metadata={"tool_name": tool.name}
-    )
-    for tool in all_tools if hasattr(tool, "description")
-]
-
-document_ids = vector_store.add_documents(tool_documents)
 
 print("🔧 All bound tools:", [t.name for t in all_tools])
 
