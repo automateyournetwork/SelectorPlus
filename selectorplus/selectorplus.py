@@ -1443,17 +1443,27 @@ async def assistant(state: GraphState):
 
 @traceable
 async def handle_tool_results(state: GraphState):
-    """Handles tool results and determines the next step."""
     messages = state.get("messages", [])
     context = state.get("context", {})
+    run_mode = context.get("run_mode", "start")
 
-    # Always reset run_mode after tool execution
+    # 🛠 Normalize tool messages: Fix any "model" role into "agent"
+    normalized_messages = []
+    for m in messages:
+        if isinstance(m, dict):
+            if m.get("role") == "model":
+                m["role"] = "agent"
+            normalized_messages.append(m)
+        else:
+            normalized_messages.append(m)
+
+    # Always reset run_mode to prevent infinite loops unless LLM explicitly continues
     context["run_mode"] = "start"
 
     return {
-        "messages": messages,
+        "messages": normalized_messages,
         "context": context,
-        "__next__": "assistant"  # Go back to the assistant to process tool results
+        "__next__": "assistant"
     }
 
 # Graph setup
