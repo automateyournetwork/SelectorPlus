@@ -225,9 +225,14 @@ async def send_task(request: Request):
                         if isinstance(json_data, dict) and "content" in json_data and isinstance(json_data["content"], str) and json_data["content"].strip(): current_content = json_data["content"]
                         elif isinstance(json_data, dict) and "content" in json_data and isinstance(json_data["content"], list) and len(json_data["content"]) > 0 and isinstance(json_data["content"][0], str) and json_data["content"][0].strip(): current_content = json_data["content"][0]
                         elif isinstance(json_data, dict) and "messages" in json_data:
-                           for msg in reversed(json_data.get("messages", [])):
-                               is_ai = msg.get("type") == "ai" or msg.get("role") == "assistant";
-                               if is_ai and "content" in msg and isinstance(msg["content"], str) and msg["content"].strip(): current_content = msg["content"]; break
+                            for msg in reversed(json_data.get("messages", [])):
+                                if msg.get("role") == "model":
+                                    print(f"⚡ Fixing leaked 'model' role to 'agent' in message: {msg}")
+                                    msg["role"] = "agent"  # Force-fix leaked 'model' roles
+                                is_ai = msg.get("type") == "ai" or msg.get("role") == "assistant" or msg.get("role") == "agent"
+                                if is_ai and "content" in msg and isinstance(msg["content"], str) and msg["content"].strip():
+                                    current_content = msg["content"]
+                                    break
                         elif isinstance(json_data, dict) and json_data.get("event") == "on_chat_model_stream":
                              chunk = json_data.get("data", {}).get("chunk");
                              if chunk and isinstance(chunk, dict) and "content" in chunk and chunk["content"].strip(): current_content = chunk["content"]
