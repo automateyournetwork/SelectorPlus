@@ -38,6 +38,10 @@ os.makedirs("/output", exist_ok=True)
 
 app.mount("/output", StaticFiles(directory="/output"), name="output")
 
+@app.post("/tasks/send", tags=["A2A Task Execution"])
+async def send_task_tasks_send(request: Request):
+    return await send_task(request)
+
 @app.get("/.well-known/agent.json", tags=["A2A Discovery"])
 async def agent_card():
     # Returns standard JSON, no changes needed
