@@ -702,7 +702,8 @@ async def scheduled_selector_health_check():
                                     break
 
                         if current_content:
-                            final_response_content = current_content
+                            # Set final content and append footer in one step
+                            final_response_content = current_content + "\n\n---\n🔔 *This is an automated health report from your AI Network Assistant.*"
 
                     except Exception as parse_err:
                         logger.warning(f"⚠️ Warning processing scheduled stream line: '{line}'. Error: {parse_err}")
