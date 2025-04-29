@@ -630,7 +630,7 @@ async def send_push_notification(session_id: str, content: str):
 
 async def scheduled_selector_health_check():
     """
-    Runs a natural language health check prompt every 15 minutes,
+    Runs a natural language health check prompt every 5 minutes,
     interacts with LangGraph agent, and sends a push notification
     summarizing the network health using Selector.
     """
@@ -650,6 +650,7 @@ async def scheduled_selector_health_check():
             "Use the appropriate visualization tools you have access to to display the results visually in a graph or chart.\n"
             "Provide the link to the generated chart in the final message.\n"
             "Finally, generate a summary report of my network health."
+            "Format the response as a Slack API BlockKit message with sections and fields.\n"
         )
 
 
