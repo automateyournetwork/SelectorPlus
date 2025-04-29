@@ -494,7 +494,7 @@ async def startup():
                 print(f"⚠️ Could not wrap peer tool {tool_name} from {peer_url}: {e}")
 
     # 🎯 NEW: Schedule the interface health check every 5 minutes
-    scheduler.add_job(scheduled_interface_check, "interval", minutes=5)
+    scheduler.add_job(scheduled_selector_health_check, "interval", minutes=5)
     scheduler.start()
     print("⏰ Scheduled interface health check every 5 minutes.")
 
@@ -628,7 +628,7 @@ async def send_push_notification(session_id: str, content: str):
         traceback.print_exc()
         return False
 
-async def scheduled_interface_check():
+async def scheduled_selector_health_check():
     """
     Runs a natural language health check prompt every 15 minutes,
     interacts with LangGraph agent, and sends a push notification
