@@ -797,13 +797,12 @@ AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
 # Environment variables or defaults
 AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Agent")
 AGENT_DESCRIPTION = os.getenv("A2A_AGENT_DESCRIPTION", "LangGraph-based MCP agent for Selector AI and other MCPs.")
-AGENT_HOST = os.getenv("A2A_AGENT_HOST", "35a5-12-222-71-242.ngrok-free.app")
+AGENT_HOST = os.getenv("A2A_AGENT_HOST", "70.49.67.246")
 AGENT_PORT = os.getenv("A2A_AGENT_PORT", "10000")
-
-# AGENT_URL = f"https://{AGENT_HOST}:{AGENT_PORT}"
+AGENT_URL = f"http://{AGENT_HOST}:{AGENT_PORT}"
 
 #ngrok hides the port
-AGENT_URL = f"https://{AGENT_HOST}"
+#AGENT_URL = f"https://{AGENT_HOST}"
 
 # ✅ Use standards-compliant fields
 agent_card = {

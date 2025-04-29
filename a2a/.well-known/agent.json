@@ -2,10 +2,10 @@
   "name": "Selector Agent",
   "description": "LangGraph-based MCP agent for Selector AI and other MCPs.",
   "version": "1.0",
-  "url": "https://35a5-12-222-71-242.ngrok-free.app",
-  "endpoint": "https://35a5-12-222-71-242.ngrok-free.app",
+  "url": "http://70.49.67.246:10000",
+  "endpoint": "http://70.49.67.246:10000",
   "methods": {
-    "send": "https://35a5-12-222-71-242.ngrok-free.app/"
+    "send": "http://70.49.67.246:10000/"
   },
   "capabilities": {
     "a2a": true,
