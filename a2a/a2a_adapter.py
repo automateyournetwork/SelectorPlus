@@ -647,6 +647,8 @@ async def scheduled_selector_health_check():
             "Then, for any reported issues, ask for the operational status of the affected interfaces on those devices.\n"
             "Also, check for violating interfaces inbound and outbound for each of these devices.\n"
             "Use the responses from previous questions as variables to drive the next question.\n"
+            "Use the appropriate visualization tools you have access to to display the results visually in a graph or chart.\n"
+            "Provide the link to the generated chart in the final message.\n"
             "Finally, generate a summary report of my network health."
         )
 
