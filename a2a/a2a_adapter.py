@@ -711,9 +711,9 @@ async def scheduled_selector_health_check():
 
             # --- Very simple health check ---
             if "down" in final_response_content.lower():
-                summary = f"⚠️ Interface down detected:\n{final_response_content[:500]}"
+                summary = f"⚠️ Interface down detected:\n{final_response_content}"
             else:
-                summary = f"✅ All interfaces appear healthy:\n{final_response_content[:500]}"
+                summary = f"✅ All interfaces appear healthy:\n{final_response_content}"
 
             # Push notification
             await send_push_notification(session_id=session_id, content=summary)
