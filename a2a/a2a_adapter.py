@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from langchain.output_parsers.json import parse_json_markdown
 import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -254,8 +255,8 @@ async def send_task(request: Request, background_tasks: BackgroundTasks):
                 if filename.endswith(".png") or filename.endswith(".svg"):
                     filepath = os.path.join(output_dir, filename)
                     mime_type = "image/png" if filename.endswith(".png") else "image/svg+xml"
-                    public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-                    artifact_uri = f"{public_base_url}/output/{filename}" if public_base_url else f"/output/{filename}"
+                    public_base_url = os.getenv("PUBLIC_BASE_URL", "http://70.49.67.246:10000").rstrip("/")
+                    artifact_uri = f"{public_base_url}/output/{filename}"
 
                     artifacts.append({
                         "type": mime_type,
@@ -729,25 +730,38 @@ async def scheduled_selector_health_check():
 
 def send_slack_message(content: str):
     """
-    Sends a text message to a Slack channel using Bot Token.
+    Sends a Slack Block Kit message if possible, otherwise falls back to plain text.
     """
     if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
         logger.error("Slack credentials not set. Cannot send Slack message.")
         return False
 
     try:
-        response = slack_client.chat_postMessage(
-            channel=SLACK_CHANNEL_ID,
-            text=content
-        )
-        logger.info(f"✅ Sent Slack message successfully. Response: {response['ts']}")
-        return True
-    except SlackApiError as e:
-        logger.error(f"❌ Slack API error: {e.response['error']}")
-        return False
+        # Try to parse markdown-wrapped JSON Block Kit
+        parsed_blockkit = parse_json_markdown(content)
+        if isinstance(parsed_blockkit, dict) and "blocks" in parsed_blockkit:
+            response = slack_client.chat_postMessage(
+                channel=SLACK_CHANNEL_ID,
+                text="🧠 Network Health Report",
+                blocks=parsed_blockkit["blocks"]
+            )
+            logger.info("✅ Sent Slack Block Kit message successfully.")
+        else:
+            raise ValueError("No 'blocks' found in parsed JSON.")
+
     except Exception as e:
-        logger.error(f"❌ Unexpected error sending Slack message: {e}")
-        return False
+        logger.warning(f"⚠️ Could not parse as Block Kit JSON: {e}. Falling back to plain text.")
+        try:
+            response = slack_client.chat_postMessage(
+                channel=SLACK_CHANNEL_ID,
+                text=content
+            )
+            logger.info(f"✅ Sent Slack fallback message successfully. Response: {response['ts']}")
+        except Exception as send_err:
+            logger.error(f"❌ Final fallback also failed: {send_err}")
+            return False
+
+    return True
 
 @app.on_event("shutdown")
 async def app_shutdown():
