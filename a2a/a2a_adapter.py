@@ -632,7 +632,7 @@ async def scheduled_interface_check():
     """
     Runs a natural language health check prompt every 15 minutes,
     interacts with LangGraph agent, and sends a push notification
-    summarizing interface health.
+    summarizing the network health using Selector.
     """
     print("🛠 Running scheduled interface check...")
 
