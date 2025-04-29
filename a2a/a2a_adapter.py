@@ -6,22 +6,33 @@ import re
 import base64
 import traceback
 from datetime import datetime # Import datetime for timestamp
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Body
 # Using JSONResponse as we will return standard JSON structure
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi import BackgroundTasks
 from langchain.tools import StructuredTool
 from pydantic import BaseModel, Field
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+scheduler = AsyncIOScheduler()
 
 # --- Environment Variables ---
 A2A_PORT = int(os.getenv("A2A_PORT", 10000))
 LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", "http://host.docker.internal:2024")
 AGENT_ID = os.getenv("AGENT_ID", "SelectorPlus")
 AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/.well-known/agent.json")
+A2A_PUSH_TARGET_URL = os.getenv("A2A_PUSH_TARGET_URL", "http://70.49.67.246:9999/receive_push") # <-- Your listener URL
+
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
+SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID")  # Set your target channel
+
+slack_client = WebClient(token=SLACK_BOT_TOKEN)
 
 app = FastAPI(
     title="LangGraph A2A Adapter",
@@ -37,10 +48,6 @@ app.mount("/.well-known", StaticFiles(directory="/a2a/.well-known"), name="well-
 os.makedirs("/output", exist_ok=True)
 
 app.mount("/output", StaticFiles(directory="/output"), name="output")
-
-@app.post("/tasks/send", tags=["A2A Task Execution"])
-async def send_task_tasks_send(request: Request):
-    return await send_task(request)
 
 @app.get("/.well-known/agent.json", tags=["A2A Discovery"])
 async def agent_card():
@@ -61,7 +68,7 @@ async def agent_card():
 
 
 @app.post("/", tags=["A2A Task Execution"])
-async def send_task(request: Request):
+async def send_task(request: Request, background_tasks: BackgroundTasks):
     """
     Receives task, interacts with LangGraph, returns standard JSONRPCResponse
     with result conforming to the Task model from common/types.py.
@@ -95,19 +102,19 @@ async def send_task(request: Request):
     message_object = params.get("message")
     if isinstance(message_object, dict):
         message_parts = message_object.get("parts", [])
-
+    
         # Extract any attached files and save them to /output
         file_parts = [
             part for part in message_parts
             if isinstance(part, dict) and part.get("type") == "file" and "file" in part
         ]
-
+        
         file_paths = []
         for part in file_parts:
             file_info = part["file"]
             file_name = file_info.get("name", f"uploaded_{uuid.uuid4().hex}")
             file_bytes = file_info.get("bytes")
-
+    
             if file_bytes:
                 decoded = base64.b64decode(file_bytes)
                 filepath = os.path.join("/output", file_name)
@@ -115,7 +122,7 @@ async def send_task(request: Request):
                     f.write(decoded)
                 file_paths.append(filepath)
                 print(f"📁 Saved uploaded file to {filepath}")
-
+    
         # Extract the message content (text) if present
         for part in message_parts:
             if isinstance(part, dict) and part.get("type") == "text":
@@ -175,7 +182,7 @@ async def send_task(request: Request):
 
 
     # --- Call LangGraph Run Stream Endpoint ---
-    try:
+    try:   
         async with httpx.AsyncClient(base_url=LANGGRAPH_URL) as client:
             langgraph_payload = {
                 "input": {
@@ -187,20 +194,19 @@ async def send_task(request: Request):
                 },
                 "assistant_id": AGENT_ID
             }
-
             if AGENT_ID: langgraph_payload["assistant_id"] = AGENT_ID
 
             # --- Inject optional fields from params into the LangGraph input ---
             # 1. historyLength -> controls how many past messages LangGraph includes
             if "historyLength" in params:
                 langgraph_payload["input"]["historyLength"] = params["historyLength"]
-            
+
             # 2. metadata -> attach custom user-defined metadata to the LangGraph input
             if "metadata" in params:
                 langgraph_payload["input"]["metadata"] = params["metadata"]
             else:
                 langgraph_payload["input"]["metadata"] = {}
-            
+
             # 3. parentId -> add as part of metadata if supplied
             if "parentId" in params:
                 langgraph_payload["input"]["metadata"]["parentId"] = params["parentId"]
@@ -225,14 +231,9 @@ async def send_task(request: Request):
                         if isinstance(json_data, dict) and "content" in json_data and isinstance(json_data["content"], str) and json_data["content"].strip(): current_content = json_data["content"]
                         elif isinstance(json_data, dict) and "content" in json_data and isinstance(json_data["content"], list) and len(json_data["content"]) > 0 and isinstance(json_data["content"][0], str) and json_data["content"][0].strip(): current_content = json_data["content"][0]
                         elif isinstance(json_data, dict) and "messages" in json_data:
-                            for msg in reversed(json_data.get("messages", [])):
-                                if msg.get("role") == "model":
-                                    print(f"⚡ Fixing leaked 'model' role to 'agent' in message: {msg}")
-                                    msg["role"] = "agent"  # Force-fix leaked 'model' roles
-                                is_ai = msg.get("type") == "ai" or msg.get("role") == "assistant" or msg.get("role") == "agent"
-                                if is_ai and "content" in msg and isinstance(msg["content"], str) and msg["content"].strip():
-                                    current_content = msg["content"]
-                                    break
+                           for msg in reversed(json_data.get("messages", [])):
+                               is_ai = msg.get("type") == "ai" or msg.get("role") == "assistant";
+                               if is_ai and "content" in msg and isinstance(msg["content"], str) and msg["content"].strip(): current_content = msg["content"]; break
                         elif isinstance(json_data, dict) and json_data.get("event") == "on_chat_model_stream":
                              chunk = json_data.get("data", {}).get("chunk");
                              if chunk and isinstance(chunk, dict) and "content" in chunk and chunk["content"].strip(): current_content = chunk["content"]
@@ -243,7 +244,7 @@ async def send_task(request: Request):
             # --- Format and Return SUCCESS Response CONFORMING TO Task MODEL ---
             final_status_object = {
                 "state": "completed",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat()                
             }
 
             # --- Artifact detection ---
@@ -255,7 +256,7 @@ async def send_task(request: Request):
                     mime_type = "image/png" if filename.endswith(".png") else "image/svg+xml"
                     public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
                     artifact_uri = f"{public_base_url}/output/{filename}" if public_base_url else f"/output/{filename}"
-                    
+
                     artifacts.append({
                         "type": mime_type,
                         "uri": artifact_uri,
@@ -274,14 +275,14 @@ async def send_task(request: Request):
 
             if final_response_content:
                 print(f"✅ Successfully processed stream for task {task_param_id}. Placing answer in status.message.")
-                
+
                 # Optionally append links
                 if artifacts:
                     public_links = "\n".join(
                         f"[{a['description']}]({a['uri']})" for a in artifacts
                     )
                     final_response_content += f"\n\n📎 Public File Links:\n{public_links}"
-            
+
                 final_status_object["message"] = {
                      "role": "agent",
                      "parts": [{"type": "text", "text": final_response_content}]
@@ -303,6 +304,15 @@ async def send_task(request: Request):
 
             # Debug print the final payload
             print(f"🔵 DEBUG: Adapter sending success payload (conforming to Task): {json.dumps(response_payload_to_send)}")
+            summary = final_response_content if final_response_content else "No content received from LangGraph."
+            # Send a push notification to the A2A system/UI
+            # Note: This is a background task to avoid blocking the response
+            # Use the session_id for the push notification
+            # Note: The session_id is used to identify the context of the push notification
+            background_tasks.add_task(send_push_notification, session_id, summary) # Send push notification in background
+            # Send the response back to the client
+            print(f"✅ Sending success response for task {task_param_id} to client.")
+            # Return the JSON-RPC response
             return JSONResponse(content=response_payload_to_send)
 
     # --- Handle Exceptions during LangGraph RUN ---
@@ -437,9 +447,10 @@ peer_agents = {}
 delegated_tools = []
 
 @app.on_event("startup")
-async def discover_peer_agents():
+async def startup():
     global peer_agents, delegated_tools
     print("🌐 Auto-discovering A2A peers...")
+
     for peer_url in A2A_PEER_AGENTS:
         if not peer_url.strip():
             continue
@@ -481,6 +492,11 @@ async def discover_peer_agents():
 
             except Exception as e:
                 print(f"⚠️ Could not wrap peer tool {tool_name} from {peer_url}: {e}")
+
+    # 🎯 NEW: Schedule the interface health check every 5 minutes
+    scheduler.add_job(scheduled_interface_check, "interval", minutes=5)
+    scheduler.start()
+    print("⏰ Scheduled interface health check every 5 minutes.")
 
 def schema_to_pydantic_model(name: str, schema: dict):
     """Dynamically creates a Pydantic model class from a JSON Schema."""
@@ -557,6 +573,181 @@ def schema_to_pydantic_model(name: str, schema: dict):
 
     return type(name, (BaseModel,), namespace)
 
+async def send_push_notification(session_id: str, content: str):
+    """
+    Sends a proactive push notification message FROM the agent TO the A2A system/UI,
+    marked as 'completed' with the content inside status.message.
+    """
+    if not A2A_PUSH_TARGET_URL:
+        logger.error("A2A_PUSH_TARGET_URL is not set. Cannot send push notification.")
+        return False
+
+    push_task_id = f"push_{uuid.uuid4().hex}" # Unique ID for this push message/task
+    request_rpc_id = str(uuid.uuid4()) # Unique ID for the JSON-RPC request itself
+
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "task",  # Confirmed with A2A spec
+        "params": {
+            "id": push_task_id,
+            "sessionId": session_id,
+            "status": {
+                "state": "completed",  # Important: COMPLETED not pending
+                "timestamp": datetime.now().isoformat(),
+                "message": {
+                    "role": "agent",  # Role must be agent
+                    "parts": [
+                        {"type": "text", "text": content}
+                    ]
+                }
+            },
+            "artifacts": None,
+            "history": None,
+            "metadata": None
+        },
+        "id": request_rpc_id
+    }
+
+    logger.info(f"Attempting to push notification to session {session_id} via {A2A_PUSH_TARGET_URL}")
+    logger.debug(f"Push Payload: {json.dumps(payload, indent=2)}")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(A2A_PUSH_TARGET_URL, json=payload, timeout=15.0)
+            response.raise_for_status()
+            logger.info(f"Push notification sent successfully to session {session_id}. Response: {response.status_code}")
+            return True
+    except httpx.RequestError as e:
+        logger.error(f"❌ Failed to connect to A2A Push Target URL {A2A_PUSH_TARGET_URL}: {e}")
+        return False
+    except httpx.HTTPStatusError as e:
+        logger.error(f"❌ Push notification failed. Status: {e.response.status_code}, Response: {e.response.text}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ An unexpected error occurred during push notification: {e}")
+        traceback.print_exc()
+        return False
+
+async def scheduled_interface_check():
+    """
+    Runs a natural language health check prompt every 15 minutes,
+    interacts with LangGraph agent, and sends a push notification
+    summarizing interface health.
+    """
+    print("🛠 Running scheduled interface check...")
+
+    try:
+        # Use a Natural Language Prompt
+        message = (
+            "Please check the overall health of my devices using the ask selector tool.\n"
+            "You have access to the get_selector_phrases tool to find the exact wording to ask the correct questions.\n"
+            "First, ask selector for unhealthy devices and focus on them.\n"
+            "Next, identify which devices are unhealthy.\n"
+            "For each unhealthy device, ask for interface health details.\n"
+            "Then, for any reported issues, ask for the operational status of the affected interfaces on those devices.\n"
+            "Also, check for violating interfaces inbound and outbound for each of these devices.\n"
+            "Use the responses from previous questions as variables to drive the next question.\n"
+            "Finally, generate a summary report of my network health."
+        )
+
+
+        session_id = str(uuid.uuid4())  # Create a fresh session ID
+
+        langgraph_payload = {
+            "input": {
+                "messages": [{"role": "user", "type": "human", "content": message}],
+                "peer_agents": list(peer_agents.values()),
+                "metadata": {}
+            },
+            "assistant_id": AGENT_ID
+        }
+
+        async with httpx.AsyncClient(base_url=LANGGRAPH_URL) as client:
+            response = await client.post("/threads", json={"assistant_id": AGENT_ID})
+            response.raise_for_status()
+            thread_data = response.json()
+            thread_id = thread_data.get("thread_id")
+
+            if not thread_id:
+                logger.error("Failed to create thread for scheduled task.")
+                return
+
+            logger.info(f"Created thread {thread_id} for scheduled health check.")
+
+            # Now post the message into the thread
+            resp = await client.post(f"/threads/{thread_id}/runs/stream", json=langgraph_payload, timeout=90.0)
+            resp.raise_for_status()
+
+            text = resp.text.strip()
+            final_response_content = None
+            lines = text.split("\n")
+            for line in lines:
+                line = line.strip()
+                if line.startswith("data:"):
+                    try:
+                        data_content = line[5:].strip()
+                        if not data_content:
+                            continue
+                        json_data = json.loads(data_content)
+                        current_content = None
+
+                        if isinstance(json_data, dict) and "content" in json_data and isinstance(json_data["content"], str):
+                            current_content = json_data["content"]
+                        elif isinstance(json_data, dict) and "messages" in json_data:
+                            for msg in reversed(json_data["messages"]):
+                                if (msg.get("role") == "assistant" or msg.get("type") == "ai") and msg.get("content"):
+                                    current_content = msg["content"]
+                                    break
+
+                        if current_content:
+                            final_response_content = current_content
+
+                    except Exception as parse_err:
+                        logger.warning(f"⚠️ Warning processing scheduled stream line: '{line}'. Error: {parse_err}")
+
+            if not final_response_content:
+                logger.warning("No valid content received during scheduled health check.")
+                return
+
+            # --- Very simple health check ---
+            if "down" in final_response_content.lower():
+                summary = f"⚠️ Interface down detected:\n{final_response_content[:500]}"
+            else:
+                summary = f"✅ All interfaces appear healthy:\n{final_response_content[:500]}"
+
+            # Push notification
+            await send_push_notification(session_id=session_id, content=summary)
+            send_slack_message(summary)
+
+    except Exception as e:
+        logger.error(f"❌ Error during scheduled interface check: {e}")
+        traceback.print_exc()
+
+def send_slack_message(content: str):
+    """
+    Sends a text message to a Slack channel using Bot Token.
+    """
+    if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
+        logger.error("Slack credentials not set. Cannot send Slack message.")
+        return False
+
+    try:
+        response = slack_client.chat_postMessage(
+            channel=SLACK_CHANNEL_ID,
+            text=content
+        )
+        logger.info(f"✅ Sent Slack message successfully. Response: {response['ts']}")
+        return True
+    except SlackApiError as e:
+        logger.error(f"❌ Slack API error: {e.response['error']}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Unexpected error sending Slack message: {e}")
+        return False
+
+@app.on_event("shutdown")
+async def app_shutdown():
+    await http_client.aclose()
 
 # --- Main Execution ---
 if __name__ == "__main__":
