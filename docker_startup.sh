@@ -112,9 +112,9 @@ docker build -t langgraph-selectorplus -f ./selectorplus/Dockerfile ./selectorpl
 if [ $? -ne 0 ]; then echo "Error building langgraph-selectorplus image."; exit 1; fi
 echo "langgraph-selectorplus image built successfully."
 
-echo "Building a2a-adapter image..."
-docker build -t a2a-adapter ./a2a
-echo "a2a-adapter image built successfully"
+echo "Building a2a image..."
+docker build -t a2a ./a2a
+echo "a2a image built successfully"
 
 #######
 #     #
@@ -233,7 +233,7 @@ docker run -p 10000:10000 \
   -e LANGGRAPH_URL=http://host.docker.internal:2024 \
   -e PUBLIC_BASE_URL=https://76.68.137.181/ \
   -v $(pwd)/a2a:/a2a \
-  -v /home/johncapobianco/MCPyATS/shared_output:/output \
+  -v /Users/johncapobianco/SelectorPlus/shared_output:/output \
   a2a
 
 sleep 10
@@ -248,9 +248,9 @@ docker run -p 2024:2024 -dit \
   langgraph-selectorplus
 
 
-echo "Starting streamlit-app container..."
-docker run -d --name streamlit-app -p 8501:8501 streamlit-app
-echo "streamlit-app container started at http://localhost:8501"
+# echo "Starting streamlit-app container..."
+# docker run -d --name streamlit-app -p 8501:8501 streamlit-app
+# echo "streamlit-app container started at http://localhost:8501"
 
 
 # echo "All containers started."
