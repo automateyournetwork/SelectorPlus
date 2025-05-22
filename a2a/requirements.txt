@@ -2,3 +2,5 @@ fastapi
 httpx
 uvicorn
 langchain
+apscheduler
+slack_sdk

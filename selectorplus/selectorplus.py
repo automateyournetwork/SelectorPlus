@@ -93,6 +93,7 @@ def schema_to_pydantic_model(name: str, schema: dict):
 
         if json_type == "string":
             field_type = str
+        # ... (other simple types: integer, number, boolean) ...
         elif json_type == "boolean":
              field_type = bool
         elif json_type == "array":
@@ -100,41 +101,58 @@ def schema_to_pydantic_model(name: str, schema: dict):
             if not items_schema:
                 logger.warning(f"⚠️ Skipping field '{field_name}' (array missing 'items')")
                 continue
-            item_type = items_schema.get("type", "string")
-
-            if item_type == "string":
-                 field_type = List[str]
-            elif item_type == "integer":
-                 field_type = List[int]
-            elif item_type == "number":
-                 field_type = List[float]
-            elif item_type == "boolean":
-                 field_type = List[bool]
-
-            elif item_type == "object":
-                # Check if the items schema actually defines properties
-                if "properties" in items_schema and items_schema["properties"]:
-                    # If properties are defined, create a specific item model
-                    item_model = schema_to_pydantic_model(name + "_" + field_name + "_Item", items_schema)
+            
+            if "$ref" in items_schema:
+                ref = items_schema["$ref"]
+                ref_name = ref.split("/")[-1]
+                ref_schema = schema.get("$defs", {}).get(ref_name)
+                if ref_schema:
+                    item_model = schema_to_pydantic_model(f"{name}_{field_name}_Item", ref_schema)
                     field_type = List[item_model]
                 else:
-                    # If no properties defined for items, assume generic dictionaries
-                    logger.warning(f"Treating array item '{field_name}' as generic List[Dict[str, Any]] due to missing/empty properties in items schema.")
-                    field_type = List[Dict[str, Any]] # Use List[Dict] instead of List[EmptyModel]
-            else: # Handle array of Any
+                    logger.warning(f"⚠️ Could not resolve $ref for {ref}")
+                    field_type = List[Dict[str, Any]]
+
+            elif items_schema.get("type") == "object":
+                # Handle inline object definition
+                if "properties" in items_schema and items_schema["properties"]:
+                    item_model = schema_to_pydantic_model(f"{name}_{field_name}_Item", items_schema)
+                    field_type = List[item_model]
+                else:
+                    field_type = List[Dict[str, Any]]
+
+            elif items_schema.get("type") == "string":
+                field_type = List[str]
+            elif items_schema.get("type") == "integer":
+                field_type = List[int]
+            elif items_schema.get("type") == "number":
+                field_type = List[float]
+            elif items_schema.get("type") == "boolean":
+                field_type = List[bool]
+            else:
                 field_type = List[Any]
 
         elif json_type == "object":
-             # Also check objects - if no properties, maybe treat as Dict[str, Any]?
-             if "properties" in field_schema and field_schema["properties"]:
-                   # Potentially create nested model if needed, or keep as Dict for simplicity
-                   field_type = Dict[str, Any] # Keeping as Dict for now
-             else:
-                   field_type = Dict[str, Any] # Generic object becomes Dict
+            if "properties" in field_schema:
+                nested_model = schema_to_pydantic_model(name + "_" + field_name, field_schema)
+                field_type = nested_model
+            elif "$ref" in field_schema:
+                ref = field_schema["$ref"]
+                ref_name = ref.split("/")[-1]
+                ref_schema = schema["$defs"].get(ref_name)
+                if ref_schema:
+                    nested_model = schema_to_pydantic_model(name + "_" + ref_name, ref_schema)
+                    field_type = nested_model
+                else:
+                    logger.warning(f"⚠️ Could not resolve $ref for {ref}")
+                    field_type = Dict[str, Any]
+            else:
+                field_type = Dict[str, Any]
 
         else: # Handle Any type
             field_type = Any
 
+        # ... (rest of the function: optional handling, adding to namespace) ...
         if is_optional:
             field_type = Optional[field_type]
 
@@ -359,11 +377,12 @@ class MCPToolDiscovery:
 
         try:
             try:
+                # Step 1: Parse input string if needed
                 if isinstance(arguments, str):
                     arguments = json.loads(arguments)
 
-                # 🔧 Unwrap __arg1 if it's a stringified JSON object
-                if "__arg1" in arguments:
+                # Step 2: Unwrap __arg1 if necessary
+                if isinstance(arguments, dict) and "__arg1" in arguments:
                     try:
                         unwrapped = json.loads(arguments["__arg1"])
                         if isinstance(unwrapped, dict):
@@ -372,22 +391,21 @@ class MCPToolDiscovery:
                         logger.error("Failed to parse '__arg1' as JSON", exc_info=True)
                         raise ValueError("Malformed __arg1 argument") from e
 
+                # Step 3: Start working on normalized_args
                 normalized_args = arguments.copy()
+
             except Exception as e:
                 logger.error(f"Error normalizing arguments: {e}")
                 raise
-
-            # Handle specific cases if necessary (like the 'sha' key)
-            if tool_name == "create_or_update_file" and "sha" in normalized_args and normalized_args["sha"] is None:
-                del normalized_args["sha"]
-
+            
+            # 🛠️ Final use normalized_args for payload
             payload = {
                 "jsonrpc": "2.0",
                 "method": self.call_method,
                 "params": {"name": tool_name, "arguments": normalized_args},
                 "id": "2",
             }
-            payload_bytes = (json.dumps(payload) + "\n").encode('utf-8') # Encode payload
+            payload_bytes = (json.dumps(payload) + "\n").encode('utf-8')
 
             logger.info(f"🚀 Async Payload: {payload_bytes.decode('utf-8').strip()}")
 
@@ -454,7 +472,11 @@ async def _base_mcp_call(tool_name_to_call: str, service_discovery_instance: MCP
     # 🛡️ Ensure it's a dict
     try:
         if isinstance(args_dict, str):
-            args_dict = json.loads(args_dict)
+            try:
+                args_dict = json.loads(args_dict)
+            except json.JSONDecodeError:
+                # If it's not JSON, assume it's plain text for "text" or "body"
+                args_dict = {"text": args_dict}
     except Exception as e:
         logger.error(f"❌ Failed to parse args_dict string as JSON: {e}")
         return json.dumps({"status": "error", "error": f"Invalid input: {e}"})
@@ -775,13 +797,12 @@ AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
 # Environment variables or defaults
 AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Agent")
 AGENT_DESCRIPTION = os.getenv("A2A_AGENT_DESCRIPTION", "LangGraph-based MCP agent for Selector AI and other MCPs.")
-AGENT_HOST = os.getenv("A2A_AGENT_HOST", "35a5-12-222-71-242.ngrok-free.app")
+AGENT_HOST = os.getenv("A2A_AGENT_HOST", "69.156.133.54")
 AGENT_PORT = os.getenv("A2A_AGENT_PORT", "10000")
-
-# AGENT_URL = f"https://{AGENT_HOST}:{AGENT_PORT}"
+AGENT_URL = f"http://{AGENT_HOST}:{AGENT_PORT}"
 
 #ngrok hides the port
-AGENT_URL = f"https://{AGENT_HOST}"
+#AGENT_URL = f"https://{AGENT_HOST}"
 
 # ✅ Use standards-compliant fields
 agent_card = {
@@ -836,6 +857,45 @@ def format_tool_descriptions(tools: List[Tool]) -> str:
     """Formats the tool descriptions into a string."""
     return "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
 
+def normalize_tool_input(tool_name: str, args: Union[str, dict]) -> dict:
+    """
+    Normalizes the arguments passed to a tool based on known tool quirks.
+    """
+
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            args = {"text": args}
+
+    if not isinstance(args, dict):
+        raise ValueError("Tool arguments must be a dict after normalization.")
+
+    # --- Normalize specific tools ---
+    if tool_name == "send-email":
+        if "body" in args and "text" not in args:
+            args["text"] = args.pop("body")
+
+    if tool_name == "slack_post_message":
+        if isinstance(args, dict):
+            # try to find some content
+            if "message" in args and "text" not in args:
+                args["text"] = args.pop("message")
+            if "text" not in args:
+                # fallback: look for "body"
+                if "body" in args:
+                    args["text"] = args.pop("body")
+                else:
+                    args["text"] = "Slack message (no specific text provided)"
+            if "channel" not in args:
+                args["channel"] = "#general"
+        else:
+            args = {
+                "channel": "#general",
+                "text": str(args)
+            }
+
+    return args
 
 @traceable
 class ContextAwareToolNode(ToolNode):
@@ -914,7 +974,7 @@ class ContextAwareToolNode(ToolNode):
                 continue
 
             # Filter out None values AFTER getting the arguments
-            filtered_tool_input = {k: v for k, v in tool_args.items() if v is not None}
+            filtered_tool_input = normalize_tool_input(tool_name, tool_args)
             logger.debug(f"Calling tool: {tool.name} with filtered args: {filtered_tool_input}")
 
             try:
@@ -1382,17 +1442,27 @@ async def assistant(state: GraphState):
 
 @traceable
 async def handle_tool_results(state: GraphState):
-    """Handles tool results and determines the next step."""
     messages = state.get("messages", [])
     context = state.get("context", {})
+    run_mode = context.get("run_mode", "start")
 
-    # Always reset run_mode after tool execution
+    # 🛠 Normalize tool messages: Fix any "model" role into "agent"
+    normalized_messages = []
+    for m in messages:
+        if isinstance(m, dict):
+            if m.get("role") == "model":
+                m["role"] = "agent"
+            normalized_messages.append(m)
+        else:
+            normalized_messages.append(m)
+
+    # Always reset run_mode to prevent infinite loops unless LLM explicitly continues
     context["run_mode"] = "start"
 
     return {
-        "messages": messages,
+        "messages": normalized_messages,
         "context": context,
-        "__next__": "assistant"  # Go back to the assistant to process tool results
+        "__next__": "assistant"
     }
 
 # Graph setup

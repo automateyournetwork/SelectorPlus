@@ -527,19 +527,26 @@ async function main() {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     console.error("Received ListToolsRequest");
+  
+    const toolsList = [
+      listChannelsTool,
+      postMessageTool,
+      replyToThreadTool,
+      addReactionTool,
+      getChannelHistoryTool,
+      getThreadRepliesTool,
+      getUsersTool,
+      getUserProfileTool,
+    ].map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,  // Correctly expose inputSchema as parameters
+    }));
+  
     return {
-      tools: [
-        listChannelsTool,
-        postMessageTool,
-        replyToThreadTool,
-        addReactionTool,
-        getChannelHistoryTool,
-        getThreadRepliesTool,
-        getUsersTool,
-        getUserProfileTool,
-      ],
+      tools: toolsList,   // ✅ correct, only one return here!
     };
-  });
+  });     
 
   const transport = new StdioServerTransport();
   console.error("Connecting server to transport...");
