@@ -705,23 +705,23 @@ async def load_all_tools():
 
     tool_services = [
         ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
-        # ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
-        # ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        # ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        # ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        # ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        # ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
-        # ("netbox-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        # ("google-search-mcp", ["node", "/app/build/index.js"], "tools/list", "tools/call"),
-        # ("servicenow-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        # ("pyats-mcp", ["python3", "pyats_mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
-        # ("email-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
-        # ("chatgpt-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        # ("quickchart-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
-        # ("vegalite-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        # ("mermaid-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        # ("rfc-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),    
-        # ("nist-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),        
+        ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
+        ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
+        ("netbox-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("google-search-mcp", ["node", "/app/build/index.js"], "tools/list", "tools/call"),
+        ("servicenow-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("pyats-mcp", ["python3", "pyats_mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("email-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
+        ("chatgpt-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("quickchart-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
+        ("vegalite-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        ("mermaid-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        ("rfc-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),    
+        ("nist-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),        
     ]
 
     try:
@@ -797,7 +797,7 @@ AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
 # Environment variables or defaults
 AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Agent")
 AGENT_DESCRIPTION = os.getenv("A2A_AGENT_DESCRIPTION", "LangGraph-based MCP agent for Selector AI and other MCPs.")
-AGENT_HOST = os.getenv("A2A_AGENT_HOST", "70.49.67.246")
+AGENT_HOST = os.getenv("A2A_AGENT_HOST", "69.156.133.54")
 AGENT_PORT = os.getenv("A2A_AGENT_PORT", "10000")
 AGENT_URL = f"http://{AGENT_HOST}:{AGENT_PORT}"
 

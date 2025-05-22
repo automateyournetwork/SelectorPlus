@@ -27,7 +27,7 @@ A2A_PORT = int(os.getenv("A2A_PORT", 10000))
 LANGGRAPH_URL = os.getenv("LANGGRAPH_URL", "http://host.docker.internal:2024")
 AGENT_ID = os.getenv("AGENT_ID", "SelectorPlus")
 AGENT_CARD_PATH = os.getenv("AGENT_CARD_PATH", "/a2a/.well-known/agent.json")
-A2A_PUSH_TARGET_URL = os.getenv("A2A_PUSH_TARGET_URL", "http://70.49.67.246:9999/receive_push") # <-- Your listener URL
+A2A_PUSH_TARGET_URL = os.getenv("A2A_PUSH_TARGET_URL", "http://70.49.67.159:9999/receive_push") # <-- Your listener URL
 
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID")  # Set your target channel
@@ -357,9 +357,9 @@ async def discover_agent(agent_url: str) -> dict | None:
     if not (agent_url.startswith("http://") or agent_url.startswith("https://")):
         agent_url = "http://" + agent_url
 
-    # Then ensure it ends with the correct path
-    if not agent_url.endswith("/.well-known/agent.json"):
-        agent_url = agent_url.rstrip("/") + "/.well-known/agent.json"
+    # # Then ensure it ends with the correct path
+    # if not agent_url.endswith("/.well-known/agent.json"):
+    #     agent_url = agent_url.rstrip("/") + "/.well-known/agent.json"
 
     try:
         print(f"🔍 Discovering agent at {agent_url}")
@@ -494,8 +494,8 @@ async def startup():
                 print(f"⚠️ Could not wrap peer tool {tool_name} from {peer_url}: {e}")
 
     # 🎯 NEW: Schedule the interface health check every 5 minutes
-    scheduler.add_job(scheduled_selector_health_check, "interval", minutes=5)
-    scheduler.start()
+    # scheduler.add_job(scheduled_selector_health_check, "interval", minutes=5)
+    # scheduler.start()
     print("⏰ Scheduled interface health check every 5 minutes.")
 
 def schema_to_pydantic_model(name: str, schema: dict):
@@ -647,10 +647,7 @@ async def scheduled_selector_health_check():
             "Then, for any reported issues, ask for the operational status of the affected interfaces on those devices.\n"
             "Also, check for violating interfaces inbound and outbound for each of these devices.\n"
             "Use the responses from previous questions as variables to drive the next question.\n"
-            "Use the appropriate visualization tools you have access to to display the results visually in a graph or chart.\n"
-            "Provide the link to the generated chart in the final message.\n"
             "Finally, generate a summary report of my network health."
-            "Format the response as a Slack API BlockKit message with sections and fields.\n"
         )
 
 
@@ -713,15 +710,9 @@ async def scheduled_selector_health_check():
                 logger.warning("No valid content received during scheduled health check.")
                 return
 
-            # --- Very simple health check ---
-            if "down" in final_response_content.lower():
-                summary = f"⚠️ Interface down detected:\n{final_response_content}"
-            else:
-                summary = f"✅ All interfaces appear healthy:\n{final_response_content}"
-
             # Push notification
-            await send_push_notification(session_id=session_id, content=summary)
-            send_slack_message(summary)
+            await send_push_notification(session_id=session_id, content=final_response_content)
+            send_slack_message(final_response_content)
 
     except Exception as e:
         logger.error(f"❌ Error during scheduled interface check: {e}")

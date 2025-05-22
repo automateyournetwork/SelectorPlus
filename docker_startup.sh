@@ -101,10 +101,10 @@ echo "selector-mcp image built successfully."
 # docker build -t nist-mcp ./nist
 # echo "nist-mcp image built successfully"
 
-# echo "Building streamlit-app image..."
-# docker build -t streamlit-app ./streamlit
-# if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
-# echo "streamlit-app image built successfully."
+echo "Building streamlit-app image..."
+docker build -t streamlit-app ./streamlit
+if [ $? -ne 0 ]; then echo "Error building streamlit-app image."; exit 1; fi
+echo "streamlit-app image built successfully."
 
 # Build langgraph container
 echo "Building langgraph container..."
@@ -152,7 +152,7 @@ docker run -d \
 
 # docker run -dit \
 #   --name filesystem-mcp \
-#   -v "/Users/johncapobianco/SelectorPlusOutput:/projects" \
+#   -v "/Users/johncapobianco/SelctorPlus/shared_output:/projects" \
 #   filesystem-mcp
 
 # echo "Starting netbox-mcp container..."
@@ -188,13 +188,13 @@ docker run -d \
 
 # echo "Starting vegalite-mcp container..."
 # docker run -dit --name vegalite-mcp \
-#   -v "/Users/johncapobianco/SelectorPlus:/output" \
+#   -v "/Users/johncapobianco/SelectorPlus/shared_output:/output" \
 #   vegalite-mcp
 # echo "vegalite-mcp container started."
 
 # echo "Starting mermaid-mcp container..."
 # docker run -dit --name mermaid-mcp \
-#   -v "/Users/johncapobianco/SelectorPlus:/output" \
+#   -v "/Users/johncapobianco/SelectorPlus/shared_output:/output" \
 #   -e CONTENT_IMAGE_SUPPORTED=false \
 #   mermaid-mcp
 # echo "mermaid-mcp container started."
@@ -231,7 +231,7 @@ docker run -p 10000:10000 -dit \
   --env-file .env \
   --add-host=host.docker.internal:host-gateway \
   -e LANGGRAPH_URL=http://host.docker.internal:2024 \
-  -e PUBLIC_BASE_URL=https://70.53.207.50 \
+  -e PUBLIC_BASE_URL=https://70.49.67.50 \
   -v "/Users/johncapobianco/SelectorPlus/shared_output:/output" \
   -e A2A_PORT=10000 \
   a2a-adapter
@@ -248,9 +248,9 @@ docker run -p 2024:2024 -dit \
   langgraph-selectorplus
 
 
-# echo "Starting streamlit-app container..."
-# docker run -d --name streamlit-app -p 8501:8501 streamlit-app
-# echo "streamlit-app container started at http://localhost:8501"
+echo "Starting streamlit-app container..."
+docker run -d --name streamlit-app -p 8501:8501 streamlit-app
+echo "streamlit-app container started at http://localhost:8501"
 
 
-echo "All containers started."
+# echo "All containers started."

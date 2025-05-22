@@ -2,10 +2,10 @@
   "name": "Selector Agent",
   "description": "LangGraph-based MCP agent for Selector AI and other MCPs.",
   "version": "1.0",
-  "url": "http://70.49.67.246:10000",
-  "endpoint": "http://70.49.67.246:10000",
+  "url": "http://69.156.133.54:10000",
+  "endpoint": "http://69.156.133.54:10000",
   "methods": {
-    "send": "http://70.49.67.246:10000/"
+    "send": "http://69.156.133.54:10000/"
   },
   "capabilities": {
     "a2a": true,
