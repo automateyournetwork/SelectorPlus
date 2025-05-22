@@ -25,8 +25,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 
-A2A_PEER_AGENTS = os.getenv("A2A_PEER_AGENTS", "").split(",")
-
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -172,101 +170,6 @@ def summarize_recent_tool_outputs(context: dict, limit: int = 3) -> str:
             summaries.append(f"- {key}: {preview}")
     return "\n".join(summaries)
 
-# Define the input schema for the delegation tool
-class DelegateToPeerSchema(BaseModel):
-    peer_agent_url: str = Field(description="The base URL of the peer A2A agent to contact (e.g., http://agent2.example.com:10001).")
-    task_description: str = Field(description="The specific task or question to send to the peer agent.")
-    session_id: Optional[str] = Field(default=None, description="Optional session ID to maintain conversation context.")
-
-# Define the asynchronous function for the tool
-async def delegate_task_to_peer_agent(peer_agent_url: str, task_description: str, session_id: Optional[str] = None) -> str:
-    """
-    Sends a task to a peer A2A agent and returns its text response or an error message.
-    Uses the standard A2A Task model for communication.
-    """
-    logger.info(f"Attempting to delegate task to peer: {peer_agent_url}")
-    
-    # Basic URL cleanup and ensure protocol
-    peer_agent_url = peer_agent_url.strip().rstrip("/")
-    if not (peer_agent_url.startswith("http://") or peer_agent_url.startswith("https://")):
-         peer_agent_url = "http://" + peer_agent_url
-    
-    # Assume the main endpoint is at '/' relative to the base URL
-    endpoint = f"{peer_agent_url}/" 
-    
-    request_id = str(uuid.uuid4())
-    task_param_id = str(uuid.uuid4())
-    current_session_id = session_id or str(uuid.uuid4())
-
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tasks/send", # Standard A2A method
-        "params": {
-            "id": task_param_id,
-            "sessionId": current_session_id,
-            "message": {
-                "role": "user",
-                "parts": [{"type": "text", "text": task_description}]
-            },
-            "acceptedOutputModes": ["text", "structured"] # Specify desired output
-            # Add other params like historyLength if needed
-        },
-        "id": request_id
-    }
-
-    try:
-        async with httpx.AsyncClient() as client:
-            logger.info(f"Sending A2A task to {endpoint}: {json.dumps(payload)}")
-            resp = await client.post(endpoint, json=payload, timeout=60.0) # Increased timeout
-            resp.raise_for_status() # Raise exception for 4xx/5xx errors
-
-            response_data = resp.json()
-            logger.info(f"Received A2A response from {peer_agent_url}: {json.dumps(response_data)}")
-
-            # Extract the result according to the A2A Task model
-            result = response_data.get("result")
-            if not result:
-                return f"Error: Peer agent response missing 'result' field. Raw: {json.dumps(response_data)}"
-
-            status = result.get("status")
-            if not status:
-                 return f"Error: Peer agent result missing 'status' field. Raw: {json.dumps(response_data)}"
-
-            if status.get("state") == "failed":
-                 error_message = status.get("message", {}).get("parts", [{}])[0].get("text", "Unknown error")
-                 return f"Error: Peer agent failed task: {error_message}"
-
-            # Try to get the text response
-            response_message = status.get("message", {}).get("parts", [{}])[0].get("text")
-            if response_message:
-                return response_message
-            else:
-                # Handle cases where response might be elsewhere or missing
-                logger.warning(f"Could not extract text response from peer agent's successful status. Raw: {json.dumps(response_data)}")
-                # Fallback: return the whole result status as string
-                return f"Peer agent completed task, but no standard text response found. Status: {json.dumps(status)}"
-
-    except httpx.RequestError as e:
-        logger.error(f"Network error delegating task to {peer_agent_url}: {e}")
-        return f"Error: Network error connecting to peer agent {peer_agent_url}: {e}"
-    except httpx.HTTPStatusError as e:
-         logger.error(f"HTTP error delegating task to {peer_agent_url}: Status {e.response.status_code}, Response: {e.response.text}")
-         return f"Error: Peer agent {peer_agent_url} returned HTTP status {e.response.status_code}. Response: {e.response.text}"
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to decode JSON response from {peer_agent_url}: {e}. Response text: {resp.text}")
-        return f"Error: Could not decode JSON response from peer agent {peer_agent_url}."
-    except Exception as e:
-        logger.error(f"Unexpected error delegating task to {peer_agent_url}", exc_info=True)
-        return f"Error: An unexpected error occurred while delegating: {e}"
-
-# Create the StructuredTool instance
-a2a_delegation_tool = StructuredTool.from_function(
-    name="delegate_task_to_peer_agent",
-    description="Sends a specific task or question to another A2A-compatible agent at a given URL and returns its response. Use this when you lack the capability locally or are explicitly asked to consult another agent.",
-    args_schema=DelegateToPeerSchema,
-    coroutine=delegate_task_to_peer_agent # Use the async function
-)
-
 class MCPToolDiscovery:
     """Discovers and calls tools in MCP containers."""
     def __init__(self, container_name: str, command: List[str], discovery_method: str = "tools/discover",
@@ -364,14 +267,6 @@ class MCPToolDiscovery:
         """Calls a tool in the MCP container asynchronously."""
         logger.info(f"🔍 Attempting Async call tool: {tool_name}")
         logger.info(f"📦 Arguments: {arguments}")
-
-        # Note: Network inspection via subprocess.run is also blocking!
-        # If needed, run this separately or make it async too. For now, let's comment it out
-        # try:
-        #     network_inspect = subprocess.run(...) # THIS IS BLOCKING
-        #     logger.info(f"🌐 Network Details: {network_inspect.stdout}")
-        # except Exception as e:
-        #     logger.error(f"❌ Network inspection failed: {e}")
 
         command_list = ["docker", "exec", "-i", self.container_name] + self.command
 
@@ -606,95 +501,6 @@ async def get_tools_for_service(service_name, command, discovery_method, call_me
 
     return tools
 
-async def discover_agent(url: str) -> Optional[dict]:
-    """
-    Discovers metadata from a peer agent by fetching its /.well-known/agent.json file.
-
-    Args:
-        url (str): Base URL of the peer agent, e.g. http://agent2:10001
-
-    Returns:
-        dict: The parsed agent metadata if successful, or None if not.
-    """
-    cleaned_url = url.strip().rstrip("/")
-    if not cleaned_url.startswith("http://") and not cleaned_url.startswith("https://"):
-        cleaned_url = "http://" + cleaned_url
-
-    discovery_url = f"{cleaned_url}/.well-known/agent.json"
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(discovery_url, timeout=10.0)
-            response.raise_for_status()
-            agent_data = response.json()
-            return agent_data
-    except httpx.RequestError as e:
-        logger.error(f"Network error discovering peer agent at {discovery_url}: {e}")
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error {e.response.status_code} when accessing {discovery_url}: {e.response.text}")
-    except json.JSONDecodeError:
-        logger.error(f"Failed to decode JSON from {discovery_url}")
-    except Exception as e:
-        logger.error(f"Unexpected error discovering peer agent at {discovery_url}: {e}", exc_info=True)
-
-    return None
-
-def make_delegation_coroutine(peer_agent_url: str):
-    async def wrapper(**kwargs):
-        return await delegate_task_to_peer_agent(peer_agent_url=peer_agent_url, **kwargs)
-    return wrapper
-
-async def load_delegated_tools(peer_agents: Dict[str, dict]) -> List[Tool]:
-    """Creates delegation tools and wraps each peer agent's skills."""
-    delegated_tools = []
-
-    for url, agent_card in peer_agents.items():
-        agent_name = agent_card.get("name", "peer").replace(" ", "_").lower()
-
-        for skill in agent_card.get("skills", []):
-            tool_name = skill["id"]
-            tool_description = skill.get("description", "")
-            tool_schema = skill.get("parameters", {})
-
-            try:
-                InputModel = schema_to_pydantic_model(f"{tool_name}_Input", tool_schema)
-
-                async def make_delegate(peer_url=url, skill_id=tool_name):
-                    async def delegate(**kwargs):
-                        # Filter out None values from kwargs just like you do for local tools
-                        filtered_tool_input = {k: v for k, v in kwargs.items() if v is not None}
-
-                        return await delegate_task_to_peer_agent(
-                            peer_agent_url=peer_url,
-                            task_description=f"Call remote tool '{skill_id}' with args: {json.dumps(filtered_tool_input)}"
-                        )
-                    return delegate
-
-                # Important: Await and assign the coroutine before tool construction
-                delegate_coroutine = await make_delegate(url, tool_name)
-
-                tool = StructuredTool.from_function(
-                    name=f"{tool_name}_via_{agent_name}",
-                    description=f"[Remote] {tool_description}",
-                    args_schema=InputModel,
-                    coroutine=delegate_coroutine
-                )
-                delegated_tools.append(tool)
-                print(f"✅ Wrapped remote tool: {tool.name}")
-            except Exception as e:
-                print(f"⚠️ Could not wrap tool {tool_name} from {url}: {e}")
-
-        # Also create a delegation tool (explicit peer task delegation)
-        delegation_tool = StructuredTool.from_function(
-            name=f"delegate_to_{agent_name}",
-            description=f"Delegate task directly to {agent_name} at {url}",
-            args_schema=DelegateToPeerSchema,
-            coroutine=lambda **kwargs: delegate_task_to_peer_agent(peer_agent_url=url, **kwargs)
-        )
-        delegated_tools.append(delegation_tool)
-
-    return delegated_tools
-
 embedding = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 vector_store = InMemoryVectorStore(embedding=embedding)
@@ -705,23 +511,23 @@ async def load_all_tools():
 
     tool_services = [
         ("selector-mcp", ["python3", "mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
-        ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
-        ("netbox-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("google-search-mcp", ["node", "/app/build/index.js"], "tools/list", "tools/call"),
-        ("servicenow-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("pyats-mcp", ["python3", "pyats_mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("email-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
-        ("chatgpt-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("quickchart-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
-        ("vegalite-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
-        ("mermaid-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
-        ("rfc-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),    
-        ("nist-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),        
+        # ("github-mcp", ["node", "dist/index.js"], "list_tools", "call_tool"),
+        # ("google-maps-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        # ("sequentialthinking-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        # ("slack-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        # ("excalidraw-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        # ("filesystem-mcp", ["node", "/app/dist/index.js", "/projects"], "tools/list", "tools/call"),
+        # ("netbox-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        # ("google-search-mcp", ["node", "/app/build/index.js"], "tools/list", "tools/call"),
+        # ("servicenow-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        # ("pyats-mcp", ["python3", "pyats_mcp_server.py", "--oneshot"], "tools/discover", "tools/call"),
+        # ("email-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
+        # ("chatgpt-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        # ("quickchart-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),
+        # ("vegalite-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),
+        # ("mermaid-mcp", ["node", "dist/index.js"], "tools/list", "tools/call"),
+        # ("rfc-mcp", ["node", "build/index.js"], "tools/list", "tools/call"),    
+        # ("nist-mcp", ["python3", "server.py", "--oneshot"], "tools/discover", "tools/call"),        
     ]
 
     try:
@@ -739,28 +545,12 @@ async def load_all_tools():
         for tools_list in local_tools_lists :
             all_tools.extend(tools_list)
     
-        # ✅ Peer discovery inside this function
-        peer_agents = {}
-        for url in A2A_PEER_AGENTS:
-            url = url.strip()
-            if not url:
-                continue
-            agent = await discover_agent(url)
-            if agent:
-                peer_agents[url] = agent
-                print(f"✅ Discovered peer: {url}")
-            else:
-                print(f"⚠️ Failed peer discovery: {url}")
-
-        # ✅ Load delegated tools separately
-        delegated_tools = await load_delegated_tools(peer_agents)
-
         # ✅ Finalize tool sets
         local_tools = []
         for tools_list in local_tools_lists:
             local_tools.extend(tools_list)
 
-        all_tools = local_tools + delegated_tools + [a2a_delegation_tool]
+        all_tools = local_tools
 
         # ✅ Index only local tools for tool selection
         tool_documents = [
@@ -790,63 +580,6 @@ def format_tool_descriptions(tools: List[Tool]) -> str:
     )
 
 print("🔧 All bound tools:", [t.name for t in all_tools])
-
-AGENT_CARD_OUTPUT_DIR = os.getenv("AGENT_CARD_OUTPUT_DIR", "/a2a/.well-known")
-AGENT_CARD_PATH = os.path.join(AGENT_CARD_OUTPUT_DIR, "agent.json")
-
-# Environment variables or defaults
-AGENT_NAME = os.getenv("A2A_AGENT_NAME", "Selector Agent")
-AGENT_DESCRIPTION = os.getenv("A2A_AGENT_DESCRIPTION", "LangGraph-based MCP agent for Selector AI and other MCPs.")
-AGENT_HOST = os.getenv("A2A_AGENT_HOST", "69.156.133.54")
-AGENT_PORT = os.getenv("A2A_AGENT_PORT", "10000")
-AGENT_URL = f"http://{AGENT_HOST}:{AGENT_PORT}"
-
-#ngrok hides the port
-#AGENT_URL = f"https://{AGENT_HOST}"
-
-# ✅ Use standards-compliant fields
-agent_card = {
-    "name": AGENT_NAME,
-    "description": AGENT_DESCRIPTION,
-    "version": "1.0",
-    "url": AGENT_URL,
-    "endpoint": AGENT_URL,  # ✅ Essential for downstream routing
-    "methods": {
-        "send": f"{AGENT_URL}/"  # ✅ A2A-compatible 'send' route
-    },
-    "capabilities": {
-        "a2a": True,
-        "tool-use": True,
-        "chat": True
-    },
-    "skills": []
-}
-
-# Populate skills from your discovered tools
-for tool in local_tools:
-    skill = {
-        "id": tool.name,  
-        "name": tool.name,
-        "description": tool.description or "No description provided.",
-    }
-
-    if hasattr(tool, "args_schema") and tool.args_schema:
-        try:
-            skill["parameters"] = tool.args_schema.schema()
-        except Exception:
-            skill["parameters"] = {"type": "object", "properties": {}}
-
-    agent_card["skills"].append(skill)
-
-os.makedirs(AGENT_CARD_OUTPUT_DIR, exist_ok=True)
-with open(AGENT_CARD_PATH, "w") as f:
-    json.dump(agent_card, f, indent=2)
-
-print(f"✅ A2A agent card written to {AGENT_CARD_PATH}")
-print(f"🌐 Agent is reachable at: {AGENT_URL}")
-print("DEBUG: Listing contents of AGENT_CARD_OUTPUT_DIR")
-print(os.listdir(AGENT_CARD_OUTPUT_DIR))
-print("DEBUG: Full absolute path check:", os.path.abspath(AGENT_CARD_PATH))
 
 #llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-exp-03-25", temperature=0.0)
 llm = ChatOpenAI(model_name="gpt-4o", temperature="0.1")
