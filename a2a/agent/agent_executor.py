@@ -18,16 +18,21 @@ class LangGraphAgentExecutor(AgentExecutor):
         query = context.get_user_input()
         task = context.current_task
 
+        # Use provided IDs if present
+        task_id = task.id if task and task.id else context.task_id or str(uuid4())
+        context_id = task.contextId if task and task.contextId else context.context_id or str(uuid4())
+        
+        # Create a fallback task if needed (but re-use IDs from context)
         if not task:
             from a2a.types import Task
             task = Task(
-                id=str(uuid4()),
-                contextId=str(uuid4()),
+                id=task_id,
+                contextId=context_id,
                 kind="task",
                 status=TaskStatus(state=TaskState.submitted),
                 history=[]
             )
-
+        
         context_id = task.contextId or "unknown"
         task_id = task.id or "unknown"
 
