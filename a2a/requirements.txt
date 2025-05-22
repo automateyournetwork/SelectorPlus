@@ -1,6 +1,4 @@
-fastapi
+a2a-sdk
 httpx
 uvicorn
-langchain
-apscheduler
-slack_sdk
+python-dotenv

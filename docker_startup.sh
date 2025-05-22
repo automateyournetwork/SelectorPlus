@@ -225,16 +225,16 @@ docker run -d \
 #     exit 1
 # fi
 
-docker run -p 10000:10000 -dit \
-  --name a2a-adapter \
-  -v "$(pwd)/a2a:/a2a" \
-  --env-file .env \
+docker run -p 10000:10000 \
+  -dit \
+  --name a2a \
   --add-host=host.docker.internal:host-gateway \
+  --env-file .env \
   -e LANGGRAPH_URL=http://host.docker.internal:2024 \
-  -e PUBLIC_BASE_URL=https://70.49.67.50 \
-  -v "/Users/johncapobianco/SelectorPlus/shared_output:/output" \
-  -e A2A_PORT=10000 \
-  a2a-adapter
+  -e PUBLIC_BASE_URL=https://76.68.137.181/ \
+  -v $(pwd)/a2a:/a2a \
+  -v /home/johncapobianco/MCPyATS/shared_output:/output \
+  a2a
 
 sleep 10
 
