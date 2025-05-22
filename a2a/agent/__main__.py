@@ -34,7 +34,7 @@ def build_agent_card() -> AgentCard:
         skills=[
             AgentSkill(
                 id="selector_ai_query",
-                name="Run a LangGraph task",
+                name="Ask Selector Questions in Natural Language",
                 description="Run Selector Natural Language Querries and more with LangGraph",
                 examples=["Device Health", "Device Health for Device S3","Device Inventory"],
                 tags=["selector", "copilot", "natural language"]
