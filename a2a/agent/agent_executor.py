@@ -15,6 +15,7 @@ class LangGraphAgentExecutor(AgentExecutor):
     """A2A AgentExecutor wrapper for LangGraph."""
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        print("🚀 LangGraphAgentExecutor.execute() called")
         query = context.get_user_input()
         task = context.current_task
 

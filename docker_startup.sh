@@ -231,7 +231,7 @@ docker run -p 10000:10000 \
   --add-host=host.docker.internal:host-gateway \
   --env-file .env \
   -e LANGGRAPH_URL=http://host.docker.internal:2024 \
-  -e PUBLIC_BASE_URL=https://76.68.137.181/ \
+  -e PUBLIC_BASE_URL=http://76.68.137.181:10000/ \
   -v $(pwd)/a2a:/a2a \
   -v /Users/johncapobianco/SelectorPlus/shared_output:/output \
   a2a
