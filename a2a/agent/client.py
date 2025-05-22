@@ -46,7 +46,7 @@ def print_json_response(response: Any, description: str) -> None:
 
 
 async def run_single_turn_test(client: A2AClient) -> None:
-    send_payload = create_send_message_payload(text='Check interface status on R1')
+    send_payload = create_send_message_payload(text='Ask Selector Device Health for device S3')
     request = SendMessageRequest(params=MessageSendParams(**send_payload))
 
     print('--- Single Turn Request ---')
