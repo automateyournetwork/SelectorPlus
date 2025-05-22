@@ -17,7 +17,7 @@ import httpx
 import traceback
 
 # ✅ Set to your running public A2A Agent
-AGENT_URL = "https://76.68.137.181:10000"
+AGENT_URL = "http://76.68.137.181:10000"
 
 
 def create_send_message_payload(
